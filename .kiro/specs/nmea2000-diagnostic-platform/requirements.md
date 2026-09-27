@@ -18,14 +18,16 @@ This document defines requirements only (the "what"). Architecture and implement
 - **Hardware_Setup_Guide**: The wiring and physical assembly documentation (docs/hardware.md) covering shield mounting, SPI/CAN pin mapping, jumper and termination settings, power, and NMEA 2000 backbone connection for the Hardware_Target.
 - **Protocol_Core**: The platform-independent Layer 2 component that parses 29-bit CAN identifiers and reassembles fast-packet messages. No hardware or UI dependencies.
 - **CAN_Receiver**: The abstraction (`ICanReceiver`) that supplies `CanFrame` batches, implemented by real hardware sources, the Simulator, or fixture replay.
-- **CanFrame**: A single captured 29-bit extended CAN frame with CAN ID, priority, PGN, source address, destination (where applicable), DLC, payload bytes, and timestamp.
+- **CanFrame**: A single captured 29-bit extended CAN frame with CAN ID, priority, PGN, source address, destination (where applicable), DLC, payload bytes, a monotonic Capture_Time, and an optional UTC/Wall_Clock_Time.
 - **CanHealth**: The reported health state of a CAN source, including connected state, frames per second, dropped frames, and error count.
 - **PGN**: Parameter Group Number, derived from the CAN identifier.
-- **Source_Address**: The 8-bit address of the node that transmitted a frame.
+- **Source_Address**: The 8-bit address of the node that transmitted a frame. Source_Address is an attribute of a node that may change over time, not the node's identity key.
+- **NodeKey**: A stable identifier for a discovered node derived from the NMEA_NAME (from PGN 60928 ISO Address Claim) when available, and a provisional key otherwise.
+- **NMEA_NAME**: The 64-bit ISO NAME carried in a PGN 60928 Address Claim, uniquely identifying a device independent of its current Source_Address.
 - **Fast_Packet**: The NMEA 2000 multi-frame transport used for messages exceeding 8 bytes.
 - **Decoder**: A registered component that converts a decoded PGN payload into domain values.
 - **Decoder_Registry**: The plugin registry mapping PGNs to Decoders.
-- **Domain_Model**: The generic, transport-independent set of entities (VesselState, EngineState, TankState, ElectricalState, NavigationState, NetworkState, DeviceHealth).
+- **Domain_Model**: The generic, transport-independent set of entities (VesselState, EngineState, TankState, ElectricalState, NavigationState, NetworkState, DeviceHealth). NetworkState nodes are keyed by NodeKey.
 - **Live_State_Cache**: The in-memory store of the most recent decoded Domain_Model values.
 - **Ingestion_Service**: The Layer 3 Linux component that receives frame batches, normalizes events, persists data, decodes known PGNs, maintains the Live_State_Cache, and serves transports.
 - **Raw_Capture_Log**: The append-only persistent log of raw captured frames.
@@ -33,6 +35,9 @@ This document defines requirements only (the "what"). Architecture and implement
 - **Discovery_Mode**: The component that maintains the inventory of observed nodes and their identity, PGNs, and rates.
 - **Correlation_Mode**: The guided workflow that helps confirm decoded values correspond to real physical behavior.
 - **Provenance**: The origin metadata retained for every decoded value.
+- **Value_Origin**: A provenance attribute marking whether a value was directly decoded from a frame ("decoded") or computed from other decoded values ("derived").
+- **Capture_Time**: The monotonic timestamp at which a frame was captured.
+- **Wall_Clock_Time**: The optional UTC/wall-clock timestamp associated with a captured frame where a real-time clock is available.
 - **BLE_Service**: The read-only GATT service exposing Domain_Model values over Bluetooth Low Energy.
 - **BLE_Publisher**: The transport-agnostic interface publishing Domain_Model values to BLE, with a real (BlueZ/D-Bus) implementation and a mock in-memory implementation.
 - **Web_API**: The REST and WebSocket/SSE HTTP interface.
@@ -58,7 +63,7 @@ This document defines requirements only (the "what"). Architecture and implement
 5. THE Platform SHALL default CAN Backbone termination to off, treating the device as a drop node and treating Backbone termination as authoritative.
 6. WHILE the Platform starts up, shuts down, crashes, or reboots, THE Platform SHALL hold the CAN Transmit_Path in a non-driving (high-impedance) state so that the NMEA Backbone continues operating without added bus load.
 7. THE Platform SHALL treat all engine, trim, throttle, steering, ignition, and control-related values as informational only, exposing no control functions.
-8. THE Platform SHALL draw operating power from USB-C in the MVP and SHALL draw no more than 1 mA from the NMEA 2000 +12V supply.
+8. THE Platform SHALL draw operating power from USB-C in the MVP, and the NMEA 2000 NET-S (+12V) conductor SHALL be electrically unconnected to the Hardware_Target and shield in the USB-powered MVP.
 
 ### Requirement 2: Robustness Against Malformed Traffic
 
@@ -142,11 +147,13 @@ This document defines requirements only (the "what"). Architecture and implement
 
 #### Acceptance Criteria
 
-1. WHEN a PGN 127505 Fluid Level frame is decoded, THE Platform SHALL populate TankState with tank_instance, fluid_type, level_percent, capacity_litres, and quantity_remaining_litres where present, leaving any field absent from the frame unset.
+1. WHEN a PGN 127505 Fluid Level frame is decoded, THE Platform SHALL populate TankState with tank_instance, fluid_type, level_percent, and capacity_litres where present, leaving any field absent from the frame unset.
 2. THE Platform SHALL support multiple tank instances and multiple fluid types concurrently, associating each decoded TankState with a key formed by its tank_instance and Source_Address, such that no two distinct tank instances share one TankState.
 3. IF capacity_litres is missing from a PGN 127505 frame, THEN THE Platform SHALL leave capacity_litres and quantity_remaining_litres unset while retaining level_percent.
 4. WHEN a level_percent value within the range 0 through 100 inclusive is decoded, THE Platform SHALL represent that value unchanged in TankState.
 5. IF a PGN 127505 field carries an invalid or reserved value, or IF a decoded level_percent value falls outside the range 0 through 100 inclusive, THEN THE Platform SHALL leave the corresponding TankState field unset, distinguishable from a decoded value of zero.
+6. WHEN both level_percent and capacity_litres are available, THE Platform SHALL compute quantity_remaining_litres as a derived value and SHALL mark its Value_Origin as "derived" recording the derivation (level_percent x capacity_litres); IF either input is unset, THEN quantity_remaining_litres SHALL be unset.
+7. THE Platform SHALL mark directly-decoded TankState fields with Value_Origin "decoded".
 
 ### Requirement 9: Electrical and Navigation Decoding
 
@@ -164,17 +171,18 @@ This document defines requirements only (the "what"). Architecture and implement
 
 #### Acceptance Criteria
 
-1. THE Discovery_Mode SHALL maintain an inventory of observed nodes keyed by Source_Address.
-2. WHEN a frame is observed from a node, THE Discovery_Mode SHALL record, per node, the Source_Address, the set of observed PGNs, a first-seen timestamp, a last-seen timestamp, and a message rate computed as the count of messages observed within a rolling 60-second window.
-3. WHERE identity traffic is observed, THE Discovery_Mode SHALL record any manufacturer, product information, device class, device function, and decoded device type available, and SHALL retain the raw identity data when the identity cannot be resolved to a decoded device type.
-4. WHEN a PGN 60928 ISO Address Claim frame is observed, THE Discovery_Mode SHALL extract and record manufacturer code, device class, and device function.
-5. WHEN a complete PGN 126996 Product Information message is observed, THE Discovery_Mode SHALL reassemble and record the product information.
-6. IF a multi-frame PGN 126996 message cannot be reassembled within 5 seconds of its first frame, THEN THE Discovery_Mode SHALL discard the incomplete fragments, record a reassembly-failure indication for the affected Source_Address, and retain prior recorded product information for that node unchanged.
-7. THE Discovery_Mode SHALL determine device identity from observed network identity data and corroborating traffic rather than from fixed numeric Source_Address values.
-8. WHEN a node has not transmitted for a duration exceeding 3 times its most recent recorded message interval or exceeding 30 seconds, whichever is greater, THE Discovery_Mode SHALL mark the node offline.
-9. WHEN a node previously marked offline transmits a frame, THE Discovery_Mode SHALL mark the node online.
-10. IF two nodes claim the same Source_Address, THEN THE Discovery_Mode SHALL record the competing identity data for both nodes without discarding either node's observations.
-11. THE Discovery_Mode SHALL expose known nodes, unknown nodes, standard PGNs, proprietary PGNs, and message rates for every observed node without excluding any node based on its manufacturer.
+1. THE Discovery_Mode SHALL maintain an inventory of observed nodes keyed by a stable NodeKey, where the NodeKey is derived from the NMEA_NAME when a PGN 60928 Address Claim has been observed, and a provisional NodeKey otherwise.
+2. THE Discovery_Mode SHALL treat Source_Address as a mutable attribute of a node rather than its identity, and WHEN a node's NMEA_NAME appears at a new Source_Address, THE Discovery_Mode SHALL retain the same NodeKey and update the Source_Address attribute.
+3. WHEN a frame is observed from a node, THE Discovery_Mode SHALL record, per NodeKey, the current Source_Address, the set of observed PGNs, a first-seen timestamp, a last-seen timestamp, and a message rate computed as the count of messages observed within a rolling 60-second window.
+4. WHERE identity traffic is observed, THE Discovery_Mode SHALL record, per NodeKey, any manufacturer, product information, device class, device function, and decoded device type available, and SHALL retain the raw identity data when the identity cannot be resolved to a decoded device type.
+5. WHEN a PGN 60928 ISO Address Claim frame is observed, THE Discovery_Mode SHALL extract and record the NMEA_NAME, manufacturer code, device class, and device function.
+6. WHEN a complete PGN 126996 Product Information message is observed, THE Discovery_Mode SHALL reassemble and record the product information against the corresponding NodeKey.
+7. IF a multi-frame PGN 126996 message cannot be reassembled within 5 seconds of its first frame, THEN THE Discovery_Mode SHALL discard the incomplete fragments, record a reassembly-failure indication for the affected NodeKey, and retain prior recorded product information for that NodeKey unchanged.
+8. THE Discovery_Mode SHALL determine device identity from observed network identity data and corroborating traffic rather than from fixed numeric Source_Address values.
+9. WHEN a NodeKey has not been observed transmitting for a duration exceeding 3 times its most recent recorded message interval or exceeding 30 seconds, whichever is greater, THE Discovery_Mode SHALL mark the NodeKey offline.
+10. WHEN a NodeKey previously marked offline is observed transmitting a frame, THE Discovery_Mode SHALL mark the NodeKey online.
+11. IF two distinct NMEA_NAMEs (distinct NodeKeys) are observed claiming the same Source_Address, THEN THE Discovery_Mode SHALL retain both NodeKeys and their observations without discarding either, and SHALL record the address conflict.
+12. THE Discovery_Mode SHALL expose known nodes, unknown nodes, standard PGNs, proprietary PGNs, and message rates for every observed node without excluding any node based on its manufacturer.
 
 ### Requirement 11: Data Provenance
 
@@ -182,7 +190,7 @@ This document defines requirements only (the "what"). Architecture and implement
 
 #### Acceptance Criteria
 
-1. WHEN a value is decoded, THE Platform SHALL retain Provenance including Source_Address, source PGN, source node identity, a reference to the originating raw frame, timestamp, Decoder version, data quality state, and a flag indicating whether the value is standard-decoded or vendor-specific.
+1. WHEN a value is decoded, THE Platform SHALL retain Provenance including Source_Address, source PGN, source node identity, a reference to the originating raw frame, timestamp, Decoder version, data quality state, a flag indicating whether the value is standard-decoded or vendor-specific, and the Value_Origin indicating whether the value is decoded or derived, and WHERE the Value_Origin is derived, THE Platform SHALL record the derivation inputs among the retained Provenance.
 2. IF a Provenance field cannot be determined at decode time, THEN THE Platform SHALL record that field as unknown rather than omitting the Provenance.
 3. WHEN a request to view a decoded value is received, THE BLE_Service, Web_API, and Web_UI SHALL each surface the Provenance associated with that value.
 4. WHEN decoded data is persisted and later replayed, THE Platform SHALL preserve the Provenance unchanged across persistence and replay.
@@ -199,8 +207,9 @@ This document defines requirements only (the "what"). Architecture and implement
 3. THE Raw_Capture_Log SHALL be append-only.
 4. THE Ingestion_Service SHALL rotate the Raw_Capture_Log when the log reaches a configured maximum size or a configured maximum age, defaulting to 100 MB or 24 hours where no value is configured.
 5. WHEN the Ingestion_Service restarts after a stop, THE Ingestion_Service SHALL recover prior session data from the Session_Store and Raw_Capture_Log and restore the session to the state recorded at the last successful write.
-6. IF available storage falls below 50 MB free, THEN THE Ingestion_Service SHALL stop writing new capture data, record a storage-full condition retrievable by the user, and continue serving already-captured data without loss of previously persisted data.
-7. IF a write to the Session_Store or Raw_Capture_Log fails, THEN THE Ingestion_Service SHALL record a write-failure indication and retain previously persisted data unchanged.
+6. IF available storage falls below 50 MB free, THEN THE Ingestion_Service SHALL halt the capture pipeline, set a CAPTURE_HALTED_STORAGE_FULL state, stop decoding further incoming frames, and continue serving the last persisted and live state marked as stale, until persistence capacity is restored.
+7. WHILE in the CAPTURE_HALTED_STORAGE_FULL state, THE Platform SHALL NOT decode or expose any decoded value that lacks a persisted raw source frame.
+8. IF a write to the Session_Store or Raw_Capture_Log fails, THEN THE Ingestion_Service SHALL record a write-failure indication and retain previously persisted data unchanged.
 
 ### Requirement 13: BLE Read-Only Transport
 
@@ -263,6 +272,9 @@ This document defines requirements only (the "what"). Architecture and implement
 4. WHEN a field's value falls within a plausible range for a known unit but no recorded action correlates with its change, THE Correlation_Mode SHALL mark the field as unconfirmed rather than assigning a confirmed label.
 5. IF no candidate field changes within the action time window, THEN THE Correlation_Mode SHALL report zero candidates and indicate that no correlation was found without recording a confirmed label.
 6. WHERE a candidate field's correlation strength is below a configurable confirmation threshold, THE Correlation_Mode SHALL present the field as a candidate requiring confirmation rather than as a confirmed label.
+7. THE Correlation_Mode SHALL require a baseline-before window, an action window, and an after window for each recorded physical action.
+8. THE Correlation_Mode SHALL require at least two repeated physical actions that consistently produce the same candidate field change before moving that field from candidate to confirmed.
+9. IF a single physical action is recorded, or IF repeated physical actions produce inconsistent candidate field changes, THEN THE Correlation_Mode SHALL leave the field as a candidate that is unconfirmed.
 
 ### Requirement 17: Simulator and Golden Fixtures
 
@@ -373,6 +385,8 @@ This document defines requirements only (the "what"). Architecture and implement
 5. WHILE running on the Hardware_Target, THE Platform SHALL expose health metrics including total frames, frames per second, dropped frames, queue depth, CAN controller state, CAN error counters, and uptime over USB or the MCU-to-Linux Bridge/RPC.
 6. WHEN the same Simulator or Golden_Fixture input that passes on a Host_Platform is exercised against the Hardware_Target capture path, THE Platform SHALL produce equivalent decoded Domain_Model values, allowing for real-time timing differences.
 7. THE Platform SHALL confirm on the Hardware_Target that no CAN Transmit_Path is enabled, consistent with Requirement 1.
+8. THE Platform SHALL, on the bench before any Backbone connection, measure and validate that the silent-mode control line (shield D4 with the P5 shunt fitted) holds the transceiver transmit channel non-driving throughout MCU reset, boot, and firmware startup.
+9. WHERE firmware-only control cannot guarantee the non-driving state during reset and boot, THE Hardware_Setup_Guide SHALL document a hardware fail-safe (for example a pull-up making silent mode the default) so that silent mode is the power-on hardware default rather than relying solely on firmware.
 
 ### Requirement 25: Capture Promotion to Golden Fixtures
 
@@ -400,3 +414,27 @@ This document defines requirements only (the "what"). Architecture and implement
 7. THE Hardware_Setup_Guide SHALL provide a step-ordered setup and first-power-on checklist that references the passive receive-only safety constraints in Requirement 1.
 8. THE Platform SHALL document, in docs/boat-test.md, the on-boat connection and capture procedure, including termination-off verification and non-disruption of the Backbone.
 9. WHEN the hardware wiring, pin mapping, jumper or termination settings, or power arrangement change, THE Platform SHALL update the Hardware_Setup_Guide as part of the definition of done.
+
+### Requirement 27: BLE Wire Format and Fragmentation
+
+**User Story:** As a client developer, I want a defined, versioned BLE payload encoding, so that multi-instance data and provenance fit within BLE constraints and decode unambiguously.
+
+#### Acceptance Criteria
+
+1. THE BLE_Service SHALL define a versioned, compact binary encoding (for example CBOR or a documented compact binary event envelope) for characteristic payloads, rather than arbitrary or unbounded JSON.
+2. THE BLE_Service SHALL represent multiple engine and tank instances within the encoding without a fixed single-instance assumption.
+3. WHERE a payload exceeds the negotiated BLE ATT MTU, THE BLE_Service SHALL fragment the payload into ordered segments that a client can reassemble, and SHALL indicate segment ordering and completion.
+4. THE BLE_Service SHALL include an encoding or schema version in the payload or a companion characteristic so that clients can detect version changes.
+5. THE encoding SHALL carry each value's provenance summary including Value_Origin and staleness.
+
+### Requirement 28: BLE Access Security and Privacy
+
+**User Story:** As a boat owner, I want my vessel data protected from nearby readers, so that read-only access does not mean open access to GPS position and vessel status.
+
+#### Acceptance Criteria
+
+1. THE BLE_Service SHALL support authenticated, bonded, encrypted pairing on the Hardware_Target BLE stack.
+2. THE BLE_Service SHALL default to requiring authenticated pairing before a client may read or subscribe to vessel-data characteristics, and unauthenticated or open access SHALL be an explicit opt-in configuration.
+3. WHILE authenticated pairing is required, THE BLE_Service SHALL reject reads and notification subscriptions from unpaired clients for vessel-data characteristics.
+4. THE BLE_Service SHALL retain its read-only guarantee defined in Requirement 13 regardless of the pairing configuration.
+5. THE Platform SHALL document the BLE security model and its default in docs/ble-protocol.md and docs/security.md.
