@@ -152,7 +152,7 @@ This document defines requirements only (the "what"). Architecture and implement
 3. IF capacity_litres is missing from a PGN 127505 frame, THEN THE Platform SHALL leave capacity_litres and quantity_remaining_litres unset while retaining level_percent.
 4. WHEN a level_percent value within the range 0 through 100 inclusive is decoded, THE Platform SHALL represent that value unchanged in TankState.
 5. IF a PGN 127505 field carries an invalid or reserved value, or IF a decoded level_percent value falls outside the range 0 through 100 inclusive, THEN THE Platform SHALL leave the corresponding TankState field unset, distinguishable from a decoded value of zero.
-6. WHEN both level_percent and capacity_litres are available, THE Platform SHALL compute quantity_remaining_litres as a derived value and SHALL mark its Value_Origin as "derived" recording the derivation (level_percent x capacity_litres); IF either input is unset, THEN quantity_remaining_litres SHALL be unset.
+6. WHEN both level_percent and capacity_litres are available, THE Platform SHALL compute quantity_remaining_litres as a derived value and SHALL mark its Value_Origin as "derived" recording the derivation ((level_percent / 100) x capacity_litres); IF either input is unset, THEN quantity_remaining_litres SHALL be unset.
 7. THE Platform SHALL mark directly-decoded TankState fields with Value_Origin "decoded".
 
 ### Requirement 9: Electrical and Navigation Decoding

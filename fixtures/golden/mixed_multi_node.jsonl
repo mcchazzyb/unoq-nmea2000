@@ -1,0 +1,10 @@
+{"capture_time": 0.0, "can_id": 166854691, "priority": 2, "pgn": 127488, "source": 35, "dest": null, "dlc": 8, "payload_hex": "00603bffff7fffff", "malformed": false}
+{"capture_time": 0.01, "can_id": 166854947, "priority": 2, "pgn": 127489, "source": 35, "dest": null, "dlc": 8, "payload_hex": "001a001c0cffff6f", "malformed": false}
+{"capture_time": 0.02, "can_id": 166854947, "priority": 2, "pgn": 127489, "source": 35, "dest": null, "dlc": 8, "payload_hex": "01866405b900a0e5", "malformed": false}
+{"capture_time": 0.03, "can_id": 166854947, "priority": 2, "pgn": 127489, "source": 35, "dest": null, "dlc": 8, "payload_hex": "020600ffffffffff", "malformed": false}
+{"capture_time": 0.04, "can_id": 166854947, "priority": 2, "pgn": 127489, "source": 35, "dest": null, "dlc": 8, "payload_hex": "03000000007f7fff", "malformed": false}
+{"capture_time": 0.05, "can_id": 435294506, "priority": 6, "pgn": 127505, "source": 42, "dest": null, "dlc": 8, "payload_hex": "00bc3462070000ff", "malformed": false}
+{"capture_time": 0.060000000000000005, "can_id": 167248148, "priority": 2, "pgn": 129025, "source": 20, "dest": null, "dlc": 8, "payload_hex": "707c4a1ed0ced0fe", "malformed": false}
+{"capture_time": 0.07, "can_id": 167248404, "priority": 2, "pgn": 129026, "source": 20, "dest": null, "dlc": 8, "payload_hex": "0000c5408004ffff", "malformed": false}
+{"capture_time": 0.08, "can_id": 435295282, "priority": 6, "pgn": 127508, "source": 50, "dest": null, "dlc": 8, "payload_hex": "00ec04d6ffffffff", "malformed": false}
+{"capture_time": 0.09, "can_id": 486473827, "priority": 7, "pgn": 65280, "source": 99, "dest": null, "dlc": 8, "payload_hex": "aabbccdd01020304", "malformed": false}

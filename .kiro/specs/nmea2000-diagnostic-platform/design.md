@@ -198,7 +198,7 @@ class Provenance:                     # attached to EVERY decoded value (Req 11)
     staleness_s: float                # age since decode
     vendor_specific: bool             # standard-decoded vs vendor-specific
     value_origin: str                 # "decoded" | "derived"  (Req 8.6, 8.7, 11.1)
-    derivation: str | None = None     # for derived values, inputs used, e.g. "level_percent * capacity_litres"
+    derivation: str | None = None     # for derived values, inputs used, e.g. "(level_percent / 100) * capacity_litres"
 
 @dataclass
 class TankState:
@@ -206,7 +206,7 @@ class TankState:
     fluid_type: Optional[int] = UNSET
     level_percent: Optional[float] = UNSET      # directly decoded; Value_Origin "decoded"
     capacity_litres: Optional[float] = UNSET    # directly decoded; Value_Origin "decoded"
-    quantity_remaining_litres: Optional[float] = UNSET  # DERIVED: level_percent * capacity_litres when both present, else UNSET; Value_Origin "derived"
+    quantity_remaining_litres: Optional[float] = UNSET  # DERIVED: (level_percent / 100) * capacity_litres when both present, else UNSET; Value_Origin "derived"
     source_address: int = 0
     source_pgn: int = 0
     updated_at: float = 0.0                     # time values were last decoded (Req 6.5)
@@ -261,7 +261,7 @@ Source address is a **mutable attribute** of a node, not its identity:
 - When the same NMEA NAME reappears at a **new** source address, the **NodeKey is retained** and `current_source_address` is updated in place (Requirement 10.2).
 - When **two distinct NAMEs** (distinct NodeKeys) claim the **same** source address, **both NodeKeys are retained**, neither is discarded, and the address conflict is recorded on the affected records (Requirements 10.2, 10.11).
 
-Instance keying (Requirements 7.2, 8.2): `EngineState` and `TankState` are stored in dicts keyed by `(instance, source_address)`, so two distinct instances never share one entity. `updated_at` records the decode time of the entity's most recent field values (Requirement 6.5). Every decoded value carries a `Provenance` (Requirement 11.5) whose `value_origin` distinguishes directly-decoded (`"decoded"`) from computed (`"derived"`) values, e.g. `quantity_remaining_litres` is `"derived"` with a `derivation` of `"level_percent * capacity_litres"` (Requirements 8.6, 8.7, 11.1); a field that cannot be determined at decode time is recorded as `"unknown"` rather than omitted (Requirement 11.2).
+Instance keying (Requirements 7.2, 8.2): `EngineState` and `TankState` are stored in dicts keyed by `(instance, source_address)`, so two distinct instances never share one entity. `updated_at` records the decode time of the entity's most recent field values (Requirement 6.5). Every decoded value carries a `Provenance` (Requirement 11.5) whose `value_origin` distinguishes directly-decoded (`"decoded"`) from computed (`"derived"`) values, e.g. `quantity_remaining_litres` is `"derived"` with a `derivation` of `"(level_percent / 100) * capacity_litres"` (Requirements 8.6, 8.7, 11.1); a field that cannot be determined at decode time is recorded as `"unknown"` rather than omitted (Requirement 11.2).
 
 ## Components and Interfaces
 
@@ -826,7 +826,7 @@ Requirement 19.
 
 ### Property 33: Fuel remaining is derived and never directly asserted
 
-*For any* TankState, `quantity_remaining_litres` is present only when both `level_percent` and `capacity_litres` are present, in which case it equals their derivation (`level_percent * capacity_litres`) and carries `value_origin` "derived"; while directly-decoded fields carry `value_origin` "decoded".
+*For any* TankState, `quantity_remaining_litres` is present only when both `level_percent` and `capacity_litres` are present, in which case it equals their derivation (`(level_percent / 100) * capacity_litres`) and carries `value_origin` "derived"; while directly-decoded fields carry `value_origin` "decoded".
 
 **Validates: Requirements 8.6, 8.7, 11.1**
 

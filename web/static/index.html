@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>unoq-nmea2000 Diagnostic Dashboard</title>
+<style>
+  /* No build step: this stylesheet is the entire UI's layout logic.
+     Fluid grid/flex only, no fixed pixel widths above the 320px floor, so
+     the page never needs horizontal scroll from 320px to 1920px
+     (Requirement 15.3). Operate surface: a marine engineer glancing at this
+     under cockpit lighting needs scanability over decoration. */
+  :root {
+    --bg: #0a0c10;
+    --surface: #12151b;
+    --surface-raised: #171b23;
+    --border: #232832;
+    --text: #e7eaef;
+    --text-dim: #6b7280;
+    --text-mid: #9aa2b1;
+    --accent: #3ea6ff;
+    --stale: #d9a339;
+    --offline: #e0564f;
+    --online: #3ecf8e;
+    --mono: "SF Mono", "Berkeley Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-width: 320px;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent); color: #06111c; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.9rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 1.08rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-mid);
+  }
+  header h1 strong { color: var(--text); font-weight: 700; }
+
+  #conn-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    transition: background 300ms ease, border-color 300ms ease, color 300ms ease;
+  }
+  #conn-indicator::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 0 currentColor;
+    animation: pulse-dot 1.8s ease-out infinite;
+  }
+  @keyframes pulse-dot {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+    70% { box-shadow: 0 0 0 5px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  #conn-indicator.online { background: color-mix(in srgb, var(--online) 14%, transparent); color: var(--online); border-color: color-mix(in srgb, var(--online) 35%, transparent); }
+  #conn-indicator.stale { background: color-mix(in srgb, var(--stale) 14%, transparent); color: var(--stale); border-color: color-mix(in srgb, var(--stale) 35%, transparent); }
+  #conn-indicator.offline { background: color-mix(in srgb, var(--offline) 14%, transparent); color: var(--offline); border-color: color-mix(in srgb, var(--offline) 35%, transparent); }
+  #conn-indicator.offline::before { animation: pulse-dot 0.9s ease-out infinite; }
+
+  main {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    padding: 1px;
+  }
+  section.panel {
+    background: var(--surface);
+    padding: 1.1rem 1.1rem 1.3rem;
+    min-width: 0;
+  }
+  section.panel h2 {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 0.9rem;
+    color: var(--text-dim);
+  }
+
+  .metric-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.42rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-label {
+    font-size: 0.86rem;
+    color: var(--text-mid);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .metric-value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.38rem;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    transition: color 400ms ease;
+  }
+  .metric-value .unit {
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--text-dim);
+    margin-left: 0.25rem;
+    font-family: var(--sans);
+  }
+  .metric-value.is-unset { color: var(--text-dim); font-style: italic; font-weight: 400; }
+  .metric-value.is-stale { color: var(--stale); }
+  .metric-value.is-invalid { color: var(--offline); }
+  .metric-value.is-unknown-quality { color: var(--text-dim); }
+  .quality-badge {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    vertical-align: middle;
+  }
+  .quality-badge.stale { color: var(--stale); background: color-mix(in srgb, var(--stale) 16%, transparent); }
+  .quality-badge.invalid { color: var(--offline); background: color-mix(in srgb, var(--offline) 16%, transparent); }
+  .quality-badge.unknown { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 16%, transparent); }
+  /* The one authored motion moment: a value that just changed gets a brief
+     accent flash, exponential ease-out from the already-visible color, so
+     fast-changing telemetry (RPM) reads as alive without a jarring replace
+     or a sparkline standing in for the number itself. */
+  .metric-value.just-updated { color: var(--accent); }
+  .metric-row.empty .metric-label { color: var(--text-dim); font-style: italic; }
+
+  table#discovery-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+  }
+  #discovery-table th {
+    text-align: left;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 0 0.6rem 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  #discovery-table td {
+    padding: 0.45rem 0.6rem 0.45rem 0;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 1px;
+    color: var(--text-mid);
+  }
+  #discovery-table td:first-child { color: var(--text); font-family: var(--mono); font-size: 0.86rem; }
+  #discovery-table tbody tr { cursor: pointer; transition: background 150ms ease; }
+  #discovery-table tbody tr:hover { background: var(--surface-raised); }
+  #discovery-table tbody tr:focus-visible { outline-offset: -2px; }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+  }
+  .status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-pill.online { color: var(--online); }
+  .status-pill.offline { color: var(--text-dim); }
+
+  #discovery-empty {
+    color: var(--text-dim);
+    font-size: 0.86rem;
+    padding: 1.1rem 0 0.3rem;
+    text-align: center;
+  }
+
+  #node-detail {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 220ms ease, transform 220ms ease;
+    visibility: hidden;
+    font-size: 0.86rem;
+  }
+  #node-detail.open {
+    max-height: 340px;
+    overflow-y: auto;
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+    margin-top: 0.8rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--border);
+  }
+  #node-detail pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--text-mid);
+    background: var(--bg);
+    padding: 0.7rem;
+    border-radius: 6px;
+    margin: 0;
+  }
+
+  .panel-wide { grid-column: 1 / -1; }
+
+  @media (max-width: 480px) {
+    header { padding: 0.8rem 1rem; }
+    section.panel { padding: 0.9rem; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><strong>unoq&#8209;nmea2000</strong> &middot; diagnostic dashboard</h1>
+  <span id="conn-indicator" class="offline">connecting</span>
+</header>
+
+<main>
+  <section class="panel" id="engine-panel">
+    <h2>Engine</h2>
+    <div id="engine-fields"></div>
+  </section>
+
+  <section class="panel" id="tank-panel">
+    <h2>Fuel &amp; tanks</h2>
+    <div id="tank-fields"></div>
+  </section>
+
+  <section class="panel" id="electrical-panel">
+    <h2>Electrical</h2>
+    <div id="electrical-fields"></div>
+  </section>
+
+  <section class="panel" id="navigation-panel">
+    <h2>Navigation</h2>
+    <div id="navigation-fields"></div>
+  </section>
+
+  <section class="panel panel-wide">
+    <h2>Network discovery</h2>
+    <table id="discovery-table">
+      <thead>
+        <tr><th>Node</th><th>Manufacturer</th><th>Device class</th><th>Product</th><th>PGNs</th><th>msg/s</th><th>Status</th></tr>
+      </thead>
+      <tbody id="discovery-rows"></tbody>
+    </table>
+    <div id="discovery-empty" style="display:none;">No nodes discovered yet.</div>
+    <div id="node-detail"></div>
+  </section>
+</main>
+
+<script>
+// Vanilla JS, no build step (Requirement 15.1). Consumes the Domain_Model
+// over WebSocket as the PRIMARY path -- a push drives a render immediately,
+// not on a client timer, so fast-changing values like RPM feel reactive
+// rather than once-per-second (the server already caps the actual
+// notification rate at one per 250ms per Requirement 14.2/27 -- the client
+// adds no further throttle on top of that). REST is the fallback path only,
+// used while no socket is open, so Requirement 15.2's "WebSocket OR REST"
+// is honored without double-polling once the socket is live.
+// Updates reflect within 1s of a cache change (Requirement 15.4) -- in
+// practice within one notification interval (<=250ms) while the socket is
+// connected. Makes NO outbound request after initial page load other than
+// same-origin calls to this platform's own API (Requirement 15.6).
+(function () {
+  "use strict";
+
+  const STALE_AFTER_MS = 3000;
+  const FLASH_DURATION_MS = 450;
+  let lastUpdateAt = 0;
+  let restPollTimer = null;
+  let wsConnected = false;
+  const previousValues = new Map();
+
+  function setConnIndicator(state) {
+    const el = document.getElementById("conn-indicator");
+    el.className = state;
+    el.textContent = state === "online" ? "live" : state;
+  }
+
+  function formatValue(key, value) {
+    if (typeof value === "number") {
+      if (Number.isInteger(value)) return value.toLocaleString();
+      return value.toFixed(2);
+    }
+    if (Array.isArray(value)) return value.map((v) => Number(v).toFixed(4)).join(", ");
+    return String(value);
+  }
+
+  const UNITS = {
+    rpm: "rpm", coolant_temp: "\u00b0C", oil_pressure: "Pa", alternator_voltage: "V",
+    fuel_rate: "L/h", engine_hours: "s", trim: "%",
+    level_percent: "%", capacity_litres: "L", quantity_remaining_litres: "L",
+    battery_voltage: "V", charging_voltage: "V", current: "A",
+    cog: "\u00b0", sog: "m/s", heading: "\u00b0", depth: "m", water_temp: "\u00b0C", wind: "m/s",
+  };
+
+  function renderEntityFields(containerId, entity, fieldOrder, entityKeyPrefix) {
+    const container = document.getElementById(containerId);
+    if (!entity) {
+      container.innerHTML = '<div class="metric-row empty"><span class="metric-label">No data yet</span></div>';
+      return;
+    }
+    // Transport-level staleness (socket/REST hasn't delivered a push
+    // recently) is a DIFFERENT signal from the per-value quality/staleness
+    // this entity's own Provenance carries (Requirement 20.6) -- a push
+    // can arrive on schedule while still reporting a stale/invalid/unknown
+    // SOURCE value (e.g. CAPTURE_HALTED_STORAGE_FULL serving the last
+    // known state, or a node gone offline). Both are surfaced, not
+    // collapsed into one flag.
+    const transportStale = (Date.now() - lastUpdateAt) > STALE_AFTER_MS;
+    const provenance = entity.provenance || null;
+    const quality = provenance ? provenance.quality : null;
+    const staleness = provenance ? provenance.staleness_s : null;
+    let html = "";
+    for (const key of fieldOrder) {
+      const value = entity[key];
+      const isUnset = value === null || value === undefined;
+      const trackKey = entityKeyPrefix + ":" + key;
+      const prevValue = previousValues.get(trackKey);
+      const changed = !isUnset && prevValue !== undefined && prevValue !== value;
+      previousValues.set(trackKey, value);
+
+      const unit = UNITS[key] ? `<span class="unit">${UNITS[key]}</span>` : "";
+      const display = isUnset ? "unset" : formatValue(key, value) + unit;
+      const classes = ["metric-value"];
+      if (isUnset) classes.push("is-unset");
+      else if (quality === "invalid") classes.push("is-invalid");
+      else if (quality === "stale" || transportStale) classes.push("is-stale");
+      else if (quality === "unknown") classes.push("is-unknown-quality");
+      else if (changed) classes.push("just-updated");
+
+      // Per-value quality badge, distinct from the row's own value styling,
+      // so a stale/invalid/unknown-quality value is distinguishable from
+      // current valid data at a glance even when it's not UNSET
+      // (Requirement 20.6) -- an entity CAN be stale while individual
+      // fields still hold their last-decoded numbers.
+      let badge = "";
+      if (!isUnset && quality && quality !== "valid") {
+        const badgeClass = quality === "invalid" ? "invalid" : quality === "stale" ? "stale" : "unknown";
+        const ageLabel = typeof staleness === "number" ? ` ${staleness.toFixed(1)}s` : "";
+        badge = `<span class="quality-badge ${badgeClass}" title="Provenance quality: ${quality}${ageLabel ? ', age' + ageLabel : ''}">${quality}${ageLabel}</span>`;
+      }
+
+      html += `<div class="metric-row"><span class="metric-label">${key.replace(/_/g, " ")}</span><span class="${classes.join(" ")}" data-track="${trackKey}">${display}${badge}</span></div>`;
+    }
+    container.innerHTML = html;
+
+    // Clear the "just-updated" accent after the authored flash duration so
+    // it reads as a pulse on change, not a permanent recolor.
+    if (!transportStale) {
+      container.querySelectorAll(".just-updated").forEach((el) => {
+        setTimeout(() => el.classList.remove("just-updated"), FLASH_DURATION_MS);
+      });
+    }
+  }
+
+  function renderLive(data) {
+    const engineKeys = Object.keys(data.engines || {});
+    if (engineKeys.length === 0) {
+      document.getElementById("engine-fields").innerHTML = '<div class="metric-row empty"><span class="metric-label">No engine data yet</span></div>';
+    } else {
+      renderEntityFields("engine-fields", data.engines[engineKeys[0]],
+        ["rpm", "coolant_temp", "oil_pressure", "alternator_voltage", "fuel_rate", "engine_hours", "trim"],
+        "engine:" + engineKeys[0]);
+    }
+
+    const tankKeys = Object.keys(data.tanks || {});
+    if (tankKeys.length === 0) {
+      document.getElementById("tank-fields").innerHTML = '<div class="metric-row empty"><span class="metric-label">No tank data yet</span></div>';
+    } else {
+      renderEntityFields("tank-fields", data.tanks[tankKeys[0]],
+        ["fluid_type", "level_percent", "capacity_litres", "quantity_remaining_litres"],
+        "tank:" + tankKeys[0]);
+    }
+
+    renderEntityFields("electrical-fields", data.electrical,
+      ["battery_voltage", "charging_voltage", "current", "battery_state", "dc_source"], "electrical");
+    renderEntityFields("navigation-fields", data.navigation,
+      ["position", "cog", "sog", "heading", "depth", "water_temp", "wind"], "navigation");
+
+    lastUpdateAt = Date.now();
+    setConnIndicator(data.stale ? "stale" : "online");
+  }
+
+  function renderDiscoveryEmpty() {
+    document.getElementById("discovery-rows").innerHTML = "";
+    document.getElementById("discovery-empty").style.display = "block";
+  }
+
+  function renderDiscovery(nodes) {
+    const rows = document.getElementById("discovery-rows");
+    const allNodes = (nodes.known || []).concat(nodes.unknown || []);
+    if (allNodes.length === 0) {
+      renderDiscoveryEmpty();
+      return;
+    }
+    document.getElementById("discovery-empty").style.display = "none";
+    rows.innerHTML = "";
+    for (const node of allNodes) {
+      const tr = document.createElement("tr");
+      tr.tabIndex = 0;
+      tr.dataset.nodeKey = node.node_key;
+      const manufacturer = node.manufacturer_code ?? "\u2014";
+      const deviceClass = node.device_class ?? "\u2014";
+      const product = node.product_info || "\u2014";
+      const pgns = node.observed_pgns ? node.observed_pgns.join(", ") : "\u2014";
+      const rate = node.message_rate ?? 0;
+      const statusClass = node.online ? "online" : "offline";
+      const statusLabel = node.online ? "online" : "offline";
+      tr.innerHTML = `<td>${node.node_key}</td><td>${manufacturer}</td><td>${deviceClass}</td><td>${product}</td><td>${pgns}</td><td>${rate}</td><td><span class="status-pill ${statusClass}">${statusLabel}</span></td>`;
+      tr.addEventListener("click", () => selectNode(node));
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") selectNode(node); });
+      rows.appendChild(tr);
+    }
+  }
+
+  function selectNode(node) {
+    const detail = document.getElementById("node-detail");
+    detail.classList.add("open");
+    detail.innerHTML = `<strong>${node.node_key}</strong><pre>${JSON.stringify(node, null, 2)}</pre>`;
+  }
+
+  function connectWebSocket() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    let ws;
+    try {
+      ws = new WebSocket(`${proto}//${location.host}/api/v1/live/ws`);
+    } catch (e) {
+      startRestFallback();
+      return;
+    }
+    ws.onmessage = (event) => {
+      try {
+        renderLive(JSON.parse(event.data));
+      } catch (e) { /* malformed push ignored, next push recovers */ }
+    };
+    ws.onopen = () => {
+      wsConnected = true;
+      stopRestFallback(); // socket is the primary path once it's live
+      ws.send("hello");
+    };
+    ws.onclose = () => {
+      wsConnected = false;
+      setConnIndicator("offline");
+      startRestFallback();
+      setTimeout(connectWebSocket, 2000);
+    };
+    ws.onerror = () => ws.close();
+  }
+
+  async function pollRestFallback() {
+    if (wsConnected) return; // socket already serving; no double-push
+    try {
+      const response = await fetch("/api/v1/live");
+      if (response.ok) renderLive(await response.json());
+    } catch (e) { setConnIndicator("offline"); }
+  }
+
+  function startRestFallback() {
+    if (restPollTimer) return;
+    pollRestFallback();
+    restPollTimer = setInterval(pollRestFallback, 1000);
+  }
+
+  function stopRestFallback() {
+    if (restPollTimer) { clearInterval(restPollTimer); restPollTimer = null; }
+  }
+
+  // Discovery view updates at a human-readable 1s cadence regardless of the
+  // live-telemetry transport -- node inventory does not need push latency.
+  async function pollDiscovery() {
+    try {
+      const response = await fetch("/api/v1/nodes");
+      if (response.ok) renderDiscovery(await response.json());
+    } catch (e) { /* discovery view just stays as last-known */ }
+  }
+  pollDiscovery();
+  setInterval(pollDiscovery, 1000);
+
+  startRestFallback();
+  connectWebSocket();
+})();
+</script>
+</body>
+</html>

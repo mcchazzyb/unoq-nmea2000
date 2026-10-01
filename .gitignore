@@ -1,0 +1,30 @@
+# Secrets / local config — never commit
+.env
+.env.*
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.hypothesis/
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+htmlcov/
+.coverage
+
+# Capture / session data (runtime artifacts, not source)
+*.jsonl
+!fixtures/**/*.jsonl
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+
+# Local Kiro CLI tooling state (not project source)
+.kiro/settings/

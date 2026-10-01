@@ -1,0 +1,3 @@
+{"capture_time": 0.0, "can_id": 435294506, "priority": 6, "pgn": 127505, "source": 42, "dest": null, "dlc": 8, "payload_hex": "00204e62070000ff", "malformed": false}
+{"capture_time": 1.0, "can_id": 435294506, "priority": 6, "pgn": 127505, "source": 42, "dest": null, "dlc": 8, "payload_hex": "00d43062070000ff", "malformed": false}
+{"capture_time": 2.0, "can_id": 435294506, "priority": 6, "pgn": 127505, "source": 42, "dest": null, "dlc": 8, "payload_hex": "00b80b62070000ff", "malformed": false}

@@ -1,0 +1,2 @@
+{"capture_time": 0.0, "can_id": 486473827, "priority": 7, "pgn": 65280, "source": 99, "dest": null, "dlc": 8, "payload_hex": "aabbccdd01020304", "malformed": false}
+{"capture_time": 1.0, "can_id": 486473827, "priority": 7, "pgn": 65280, "source": 99, "dest": null, "dlc": 8, "payload_hex": "aabbccdd01020304", "malformed": false}
