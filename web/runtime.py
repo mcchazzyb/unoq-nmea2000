@@ -16,6 +16,7 @@ that Layers 2/3 cannot tell a real receiver from the Simulator.
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from typing import Iterator
@@ -28,6 +29,7 @@ from service.ingestion import IngestionService
 from service.raw_log import RawCaptureLog
 from service.session_store import SessionStore
 from simulator.generator import MultiNodeScenario
+from simulator.scenarios import DF140SmokeTestScenario
 
 logger = logging.getLogger(__name__)
 
@@ -46,21 +48,81 @@ _IDLE_POLL_S = 0.05
 _HEALTH_POLL_INTERVAL_S = 1.0
 
 
+#: Per-cycle random walk bounds for SimulatorReceiver's live demo feed --
+#: ponytail: a small fixed step range is enough to make dials visibly move
+#: without needing a real motion model; tune these if a field over/undershoots.
+_RPM_STEP = 60.0
+_COOLANT_STEP_C = 0.3
+_OIL_PRESSURE_STEP_KPA = 4.0
+_ALTERNATOR_STEP_V = 0.05
+_FUEL_RATE_STEP_LPH = 0.4
+_TANK_LEVEL_STEP_PCT = 0.05
+_SOG_STEP_KNOTS = 0.3
+_COG_STEP_DEG = 1.5
+_BATTERY_V_STEP = 0.03
+_BATTERY_I_STEP = 0.2
+
+
 class SimulatorReceiver:
     """`ICanReceiver` that cycles `MultiNodeScenario` forever, pacing frames
     to their recorded `capture_time` deltas (same pacing contract as
     `FixtureReplay`, Property 30) -- the default `UNOQ_RECEIVER` so `make
     run-api` is genuinely live with zero hardware required, matching
-    existing host-testable behavior (Requirement 17.9, 17.10)."""
+    existing host-testable behavior (Requirement 17.9, 17.10).
+
+    Each cycle's values take a small bounded random-walk step from the
+    previous cycle (not a fresh fixed snapshot every time) so dashboard
+    dials visibly move under live/demo use -- found via actual user
+    testing on the deployed board: the fixture scenarios are intentionally
+    static dataclasses for golden-fixture determinism (simulator/scenarios.py,
+    simulator/generator.py), so the variance belongs here, in the live-only
+    receiver, rather than in the fixtures those modules exist to keep fixed.
+    """
 
     def __init__(self) -> None:
         self._connected = True
         self._total_frames = 0
         self._start_monotonic = time.monotonic()
+        base = DF140SmokeTestScenario()
+        self._state = {
+            "engine_rpm": base.engine_rpm,
+            "coolant_temp_c": base.coolant_temp_c,
+            "oil_pressure_kpa": base.oil_pressure_kpa,
+            "alternator_voltage": base.alternator_voltage,
+            "fuel_rate_lph": base.fuel_rate_lph,
+            "tank_level_percent": base.tank_level_percent,
+            "sog_knots": base.sog_knots,
+            "cog_deg": base.cog_deg,
+            "battery_voltage": 12.6,
+            "battery_current": -4.2,
+        }
+
+    def _step(self, key: str, step: float, lo: float, hi: float) -> float:
+        value = self._state[key] + random.uniform(-step, step)
+        value = min(max(value, lo), hi)
+        self._state[key] = value
+        return value
+
+    def _next_scenario(self) -> MultiNodeScenario:
+        df140 = DF140SmokeTestScenario(
+            engine_rpm=self._step("engine_rpm", _RPM_STEP, 600.0, 5500.0),
+            oil_pressure_kpa=self._step("oil_pressure_kpa", _OIL_PRESSURE_STEP_KPA, 150.0, 450.0),
+            coolant_temp_c=self._step("coolant_temp_c", _COOLANT_STEP_C, 60.0, 95.0),
+            alternator_voltage=self._step("alternator_voltage", _ALTERNATOR_STEP_V, 12.8, 14.6),
+            fuel_rate_lph=self._step("fuel_rate_lph", _FUEL_RATE_STEP_LPH, 2.0, 35.0),
+            tank_level_percent=self._step("tank_level_percent", _TANK_LEVEL_STEP_PCT, 0.0, 100.0),
+            sog_knots=self._step("sog_knots", _SOG_STEP_KNOTS, 0.0, 35.0),
+            cog_deg=self._step("cog_deg", _COG_STEP_DEG, 0.0, 359.9),
+        )
+        return MultiNodeScenario(
+            df140=df140,
+            battery_voltage=self._step("battery_voltage", _BATTERY_V_STEP, 11.8, 14.6),
+            battery_current=self._step("battery_current", _BATTERY_I_STEP, -20.0, 20.0),
+        )
 
     def frames(self) -> Iterator[CanFrame]:
         while True:
-            scenario = MultiNodeScenario()
+            scenario = self._next_scenario()
             cycle_frames = scenario.frames()
             if not cycle_frames:
                 time.sleep(_IDLE_POLL_S)
