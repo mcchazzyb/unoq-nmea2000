@@ -594,7 +594,7 @@ properties (Properties 1-39 in design.md) it proves.
 
 ## Stage 9 — Firmware and bench safety validation
 
-- [ ] 9.1 MCP2518FDT firmware: SPI init, silent mode, termination off
+- [x] 9.1 MCP2518FDT firmware: SPI init, silent mode, termination off
   - Implement MCU firmware initializing SPI and the MCP2518FDT for classical CAN at
     250 kbit/s, 29-bit extended frames (_Requirement 24.2_)
   - Configure the CAN controller/transceiver into silent/listen-only mode before the
@@ -609,8 +609,13 @@ properties (Properties 1-39 in design.md) it proves.
     state, CAN error counters, uptime) over USB or the MCU-to-Linux bridge/RPC
     (_Requirement 24.5_)
   - _Requirements: 1.2, 1.3, 1.5, 1.6, 24.2-24.5_
+  - **Done 2026-10-02:** deployed via `arduino-app-cli` to the real UNO Q (`firmware/unoq_nmea2000_capture/`),
+    live-verified on actual silicon: `CAN connected=True mode=ListenOnly termination_on=False
+    dropped=0 errors=0`, repeating steadily over the real Bridge RPC. CS pin (D10, P2 shunt)
+    confirmed against the physical shield. Board stayed bench-isolated throughout (no Backbone
+    connection) — that step is gated separately by 9.2 below, which is NOT yet satisfied.
 
-- [ ] 9.2 Stage Gate — bench validation of the silent-mode fail-safe (before any Backbone
+- [~] 9.2 Stage Gate — bench validation of the silent-mode fail-safe (before any Backbone
       connection)
   - On the bench, measure and validate that the silent-mode control line (shield D4 with
     the P5 shunt fitted) holds the transceiver transmit channel non-driving throughout MCU
@@ -621,6 +626,17 @@ properties (Properties 1-39 in design.md) it proves.
   - Confirm on the bench that no CAN Transmit_Path is enabled, consistent with
     Requirement 1 (_Requirement 24.7_)
   - **This gate must pass before the device is ever connected to a live Backbone.**
+  - **Blocked 2026-10-02:** no multimeter/scope available to take the D4 electrical
+    measurement — needs real instrumentation, not something verifiable in software.
+    **Scope note:** this blocks ONLY the literal step of connecting CAN-H/CAN-L to a live
+    Backbone. It does NOT block continued bench-isolated development — Stage 9's remaining
+    software wiring (real `ArduinoBridgeCanReceiver` → `Ingestion_Service`, Web_UI running
+    on-board), Stage 10 docs, and further firmware iteration all proceed normally on the
+    bench. Unblock path: get a basic multimeter (DC voltage mode is sufficient) and follow
+    the three-phase procedure (power-on ramp, MCU reset, steady state) documented in this
+    session's chat history; or confirm the ADM3055E/shield's power-on-reset default for the
+    SILENT pin from the datasheet, which may satisfy 24.9 by hardware design without a
+    direct measurement.
   - _Validates: 1.2, 1.3, 1.5, 1.6, 24.2-24.9_
 
 ## Stage 10 — Deployment, equivalence, real BLE, and final docs
