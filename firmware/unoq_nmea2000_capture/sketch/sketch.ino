@@ -25,11 +25,12 @@
  *   is no code path that can ever enable transmission (Requirement 1.4).
  *
  * CS pin (D10) is this shield's FACTORY-DEFAULT P2 jumper position (shunt
- * pins 1-2 per the CN0401/EVAL-ADM3055E-ARDZ datasheet). VERIFY YOUR BOARD'S
- * ACTUAL P2 SHUNT POSITION before relying on this -- if your board has been
- * rejumpered to D9/D8/D7, change MCP2518_CS below to match. Getting this
- * wrong means the sketch cannot talk to the controller at all (begin()
- * returns a nonzero error code) -- a safe failure mode, not a silent one.
+ * pins 1-2 per the CN0401/EVAL-ADM3055E-ARDZ datasheet). CONFIRMED against
+ * the actual physical board on 2026-10-02 -- P2 is D10. If your board has
+ * been rejumpered to D9/D8/D7, change MCP2518_CS below to match. Getting
+ * this wrong means the sketch cannot talk to the controller at all
+ * (begin() returns a nonzero error code) -- a safe failure mode, not a
+ * silent one.
  *
  * INT pin (D2) requires the P7 shunt fitted (shield default).
  *
