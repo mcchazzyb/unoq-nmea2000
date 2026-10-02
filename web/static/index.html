@@ -552,6 +552,16 @@
   "use strict";
 
   const STALE_AFTER_MS = 3000;
+  //: An entity (engine/tank) whose last contributing PGN update is older
+  //: than this is shown as no-data/UNSET rather than its frozen last
+  //: value. Found via an actual deployed test: before the backend cache
+  //: merge fix, dials flickered value/UNSET/value because 127488 and
+  //: 127489 flat-replaced each other's fields; after that fix, a value is
+  //: now stable, but a sender that genuinely STOPS reporting (unplugged,
+  //: node offline) would otherwise show its last-ever number forever with
+  //: no visual signal -- this is that signal, separate from the whole-
+  //: payload 3s transport-staleness check above.
+  const ENTITY_NO_DATA_AFTER_MS = 10000;
   const FLASH_DURATION_MS = 450;
   let lastUpdateAt = 0;
   let restPollTimer = null;
@@ -884,6 +894,16 @@
     } else {
       const provenance = sourceEntity.provenance || null;
       const quality = provenance ? provenance.quality : null;
+      // Same entity-level no-data check as renderEntityFields (steering/
+      // Requirement 20.6 consistency: both render paths read the SAME
+      // Live_State_Cache data, so both must treat "sender stopped
+      // reporting" the same way) -- an entity can still be present in the
+      // payload (hence !isStale) with a frozen updated_at if its node went
+      // offline but the cache correctly never clears old data.
+      const entityAgeMs = sourceEntity.updated_at
+        ? (Date.now() / 1000 - sourceEntity.updated_at) * 1000
+        : Infinity;
+      const entityNoData = entityAgeMs > ENTITY_NO_DATA_AFTER_MS;
       let qualityClass = "is-stale";
       if (!isStale) {
         if (quality === "invalid") qualityClass = "is-invalid";
@@ -894,7 +914,7 @@
       bodyHtml = '<div class="dash-card-grid">';
       for (const attr of card.attributes) {
         const value = sourceEntity[attr];
-        const isUnset = value === null || value === undefined;
+        const isUnset = entityNoData || value === null || value === undefined;
         bodyHtml += GAUGE_RANGES[attr]
           ? renderGauge(attr, value, isUnset, qualityClass)
           : renderMetricCell(attr, value, isUnset, qualityClass);
@@ -964,13 +984,22 @@
     // known state, or a node gone offline). Both are surfaced, not
     // collapsed into one flag.
     const transportStale = (Date.now() - lastUpdateAt) > STALE_AFTER_MS;
+    // Per-entity no-data check: entity.updated_at is a server epoch-seconds
+    // timestamp set by the Ingestion_Service on every contributing PGN's
+    // decode (now that engine field merging is fixed, this correctly
+    // reflects the LATEST of either PGN, not just one). If nothing has
+    // updated this specific engine/tank in ENTITY_NO_DATA_AFTER_MS, treat
+    // every one of its fields as no-data rather than silently keep
+    // displaying a frozen last-seen number with no visual signal.
+    const entityAgeMs = entity.updated_at ? (Date.now() / 1000 - entity.updated_at) * 1000 : Infinity;
+    const entityNoData = entityAgeMs > ENTITY_NO_DATA_AFTER_MS;
     const provenance = entity.provenance || null;
     const quality = provenance ? provenance.quality : null;
     const staleness = provenance ? provenance.staleness_s : null;
     let html = "";
     for (const key of fieldOrder) {
       const value = entity[key];
-      const isUnset = value === null || value === undefined;
+      const isUnset = entityNoData || value === null || value === undefined;
       const trackKey = entityKeyPrefix + ":" + key;
       const prevValue = previousValues.get(trackKey);
       const changed = !isUnset && prevValue !== undefined && prevValue !== value;

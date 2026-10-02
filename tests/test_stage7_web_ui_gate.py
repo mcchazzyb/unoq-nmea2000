@@ -26,6 +26,29 @@ from web.api import create_app
 INDEX_PATH = Path("web/static/index.html")
 
 
+def test_entity_no_data_after_constant_is_defined():
+    """Regression test for a real UX bug found via an actual deployed
+    dashboard: dials flickered value/UNSET/value because the backend's
+    EngineState cache flat-replaced (fixed separately in
+    service/cache.py's _merge_engine). This constant is the complementary
+    fix the user asked for -- a sender that genuinely stops reporting for
+    10s should show no-data, not a frozen last value with no signal."""
+    html = INDEX_PATH.read_text()
+    assert "const ENTITY_NO_DATA_AFTER_MS = 10000;" in html
+
+
+def test_entity_no_data_check_wired_into_both_render_paths():
+    """Both the legacy fixed panels (renderEntityFields) and the Stage 7.6
+    selectable dashboard cards read the SAME Live_State_Cache data
+    (Requirement 6.6/20.6 consistency) -- the no-data check must be wired
+    into both, not just one, or the two views would disagree about
+    whether a sender has gone quiet."""
+    html = INDEX_PATH.read_text()
+    assert html.count("entityNoData") >= 2
+    assert "const entityAgeMs = entity.updated_at" in html
+    assert "const entityAgeMs = sourceEntity.updated_at" in html
+
+
 def _make_client(tmp_path: Path):
     cache = LiveStateCache()
     discovery = DiscoveryMode()

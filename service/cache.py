@@ -48,7 +48,17 @@ class LiveStateCache:
 
         if isinstance(entity, EngineState):
             key = (entity.engine_instance, entity.source_address)
-            self.vessel.engines[key] = entity
+            # PGN 127488 (Engine Rapid Update: rpm, trim) and PGN 127489
+            # (Engine Dynamic: coolant_temp, oil_pressure, alternator_voltage,
+            # fuel_rate, engine_hours, status) both target the SAME
+            # EngineState key but each decode only populates its own PGN's
+            # fields -- flat-replacing (as this did before) made every
+            # OTHER PGN's fields flicker back to UNSET between updates, a
+            # real visible bug (not just a display-timing artifact), found
+            # via an actual deployed dashboard showing dials flash
+            # UNSET/value/UNSET as 127488 and 127489 alternate. Merge like
+            # NavigationState already does (Requirement 9.2 pattern).
+            self.vessel.engines[key] = _merge_engine(self.vessel.engines.get(key), entity)
         elif isinstance(entity, TankState):
             key = (entity.tank_instance, entity.source_address)
             self.vessel.tanks[key] = entity
@@ -87,6 +97,30 @@ class LiveStateCache:
         which is fine since this process has no concurrent writers besides
         the single Ingestion_Service."""
         return self.vessel
+
+
+def _merge_engine(existing: EngineState | None, incoming: EngineState) -> EngineState:
+    """PGN 127488 and 127489 both populate the same EngineState key but each
+    carries a disjoint field subset -- merge rather than replace, same
+    pattern as `_merge_navigation` below (Requirement 9.2's "fields
+    populated only where present" applied across the two source PGNs,
+    not just within one decode)."""
+    if existing is None:
+        return incoming
+    from protocol.domain import UNSET
+
+    for field_name in (
+        "rpm", "coolant_temp", "oil_pressure", "alternator_voltage",
+        "engine_hours", "fuel_rate", "trim", "status",
+    ):
+        incoming_value = getattr(incoming, field_name)
+        if incoming_value is not UNSET:
+            setattr(existing, field_name, incoming_value)
+    existing.source_address = incoming.source_address
+    existing.source_pgn = incoming.source_pgn
+    existing.updated_at = incoming.updated_at
+    existing.provenance = incoming.provenance
+    return existing
 
 
 def _merge_navigation(
