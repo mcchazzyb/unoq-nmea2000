@@ -26,13 +26,32 @@ Everything else in the platform is subordinate to those two guarantees.
 | Host stack language | Python 3.11+ | One language across Protocol_Core, Ingestion, decoders, Simulator, BLE publisher, Web_API; strong host testability |
 | Web UI | Plain HTML + vanilla JS, no build step | Requirement 15.1; self-contained, offline after load |
 | API framework | FastAPI + Uvicorn, Pydantic models | Auto OpenAPI feeds docs/api.md; native WebSocket; validation for free |
-| BLE (real) | BlueZ via D-Bus is the **candidate** real implementation, **not yet locked** | Linux GATT peripheral on Hardware_Target; confirmed by an early "BlueZ GATT peripheral proof-of-concept on the actual UNO Q" spike before the specific library (`bluezero` vs `python-dbus` vs alternative) is locked. The `BLE_Publisher` abstraction makes swapping the implementation cheap. |
+| BLE (real) | BlueZ via **PyGObject (`gi.repository.Gio`/GDBus)**, locked 2026-10-02 | Linux GATT peripheral, run as a SEPARATE process on the board's host OS (`ble/bluez_publisher.py`) -- the App Lab container has no D-Bus/BlueZ access, confirmed via an actual UNO Q spike. The `BLE_Publisher` abstraction (`BlueZPublisher` wraps `MockBLEPublisher`) made this swap-in cheap, as designed. |
 | BLE (host) | In-memory mock behind `BLE_Publisher` | No radio needed; runs on every OS |
 | Session_Store | SQLite | Single-file, zero-admin, cross-platform |
 | Raw_Capture_Log | Append-only JSONL + rotation | Simple, replayable, human-inspectable |
 | MCU firmware | STM32/Arduino C/C++ | Interface-level only in MVP; Phase 1 bench validation |
 
-The specific Python BLE library is deliberately **NOT locked yet**: BlueZ via D-Bus is the candidate real path, but the concrete library (`bluezero` vs `python-dbus` vs an alternative) will be chosen only after the "BlueZ GATT peripheral proof-of-concept on the actual UNO Q" spike confirms a working GATT peripheral on the real hardware. Because everything above the boundary talks only to the `BLE_Publisher` abstraction, swapping the underlying implementation after the spike is cheap.
+**BLE library choice, locked 2026-10-02** (Stage 10.3 spike, run on the actual UNO Q):
+`PyGObject`'s `Gio.DBusConnection` (GDBus), not `python-dbus` or `bluezero`. Found live
+that `python3-gi` is already installed on the board's Debian image and reaches
+`org.bluez` immediately, while `python3-dbus` needs an `apt-get install` the deploy
+account has no passwordless sudo for -- GDBus is an equally standard BlueZ
+GATT-peripheral implementation (BlueZ's own upstream examples exist in both flavors),
+so this avoided a real deploy blocker for zero capability cost.
+
+**Deployment-topology finding from the same spike:** the Arduino App Lab Python
+container has NO access to the host's D-Bus system bus or BlueZ (`app-compose.yaml`
+mounts no dbus socket; confirmed independently via Arduino's own forum and an open,
+unmerged PR `arduino/arduino-app-cli#547`). A real GATT peripheral therefore cannot run
+inside the same container as `web/main.py`. `ble/bluez_publisher.py` runs as a
+**separate process directly on the board's Linux host**, polling the containerized
+Web_API's `/api/v1/live` + `/api/v1/health` over `127.0.0.1` (Docker's port-publish
+makes the container's port reachable there) and republishing into the real GATT
+peripheral. Because everything above the `BLE_Publisher` boundary (and `BlueZPublisher`
+itself, which wraps `MockBLEPublisher` for all state/encoding/pairing/staleness logic)
+is unaware of this topology, swapping it was still cheap, exactly as this section
+originally predicted.
 
 ## Architecture
 

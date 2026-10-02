@@ -719,11 +719,36 @@ properties (Properties 1-39 in design.md) it proves.
   - Build the "BlueZ GATT peripheral on the actual UNO Q" proof-of-concept spike to lock
     the concrete library choice (`bluezero` vs `python-dbus` vs alternative) behind the
     existing `BLEPublisher` abstraction from Stage 6
+  - **Done 2026-10-02, library locked: PyGObject (`gi.repository.Gio`/GDBus), not
+    `python-dbus`/`bluezero`.** Real architectural finding: the App Lab Python container
+    has NO D-Bus/BlueZ access at all (no dbus socket mounted in `app-compose.yaml`;
+    confirmed via Arduino's own forum + an open, unmerged PR
+    arduino/arduino-app-cli#547) -- a real GATT peripheral cannot run inside the same
+    container as `web/main.py`. `ble/bluez_publisher.py` runs as a SEPARATE process on
+    the board's Linux host instead, polling the containerized Web_API's `/api/v1/live`
+    + `/api/v1/health` over `127.0.0.1` and republishing into a real BlueZ GATT
+    peripheral. `python3-gi` was already installed on the board; `python3-dbus` would
+    have needed an `apt-get` the deploy account has no passwordless sudo for.
+    Verified live: `RegisterApplication`/`RegisterAdvertisement` both succeeded,
+    `bluetoothctl show`'s `ActiveInstances` went 0 -> 2 while running, back to 0 on
+    clean shutdown -- genuine real-radio advertisement, not just a callback firing.
+    Real bug found+fixed: `RegisterApplication` under `call_sync()` deadlocked (BlueZ
+    calls back into this process's own `ObjectManager.GetManagedObjects` to validate
+    before replying; no GLib main loop was running yet to dispatch that inbound call)
+    -- fixed by using the async `call()` form for both registration calls.
   - Implement `BlueZPublisher` satisfying the same schema, notify/read split, reconnect,
     and staleness behavior already proven against `MockBLEPublisher` (_Requirement 13.1-13.10_)
+  - **Done 2026-10-02:** `BlueZPublisher` wraps `MockBLEPublisher` for all state/
+    encoding/notify/pairing/staleness logic (reused, not reimplemented) and adds only
+    the D-Bus GATT service/characteristic/advertisement registration layer.
   - Implement authenticated, bonded, encrypted pairing on the real BlueZ stack, defaulting
     to requiring pairing before vessel-data access, with open access as an explicit opt-in
     (_Requirement 28.1, 28.2, 28.3_)
+  - **Partial:** `require_pairing` defaults True and gates characteristic reads via the
+    wrapped `MockBLEPublisher`'s existing `_check_access` (same logic already proven in
+    Stage 6). NOT yet verified: real BlueZ-level authenticated/bonded/encrypted pairing
+    (`bluetoothctl pair`/`trust` against a real phone) -- this spike proved the GATT
+    server + advertisement work on real hardware, not the full pairing flow end-to-end.
   - _Requirements: 13.1-13.10, 28.1-28.3_
 
 - [ ] 10.4 Final documentation pass (hardware scope)
