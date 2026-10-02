@@ -43,9 +43,30 @@ def test_172_16_31_address_is_permitted():
 def test_wildcard_addresses_are_always_refused():
     """Requirement 30.5: no configuration path may ever permit a wildcard
     bind -- this must hold identically before and after the RFC 1918
-    extension."""
+    extension, and the default (non-container) call path must stay refused
+    even after adding the container escape hatch."""
     assert not is_permitted_bind_host("0.0.0.0")
     assert not is_permitted_bind_host("::")
+    assert not is_permitted_bind_host("0.0.0.0", in_container=False)
+    assert not is_permitted_bind_host("::", in_container=False)
+
+
+def test_wildcard_permitted_only_with_explicit_in_container_flag():
+    """CONTAINER NOTE (web/main.py docstring): App Lab's Docker container
+    makes the container's own 0.0.0.0 the correct bind target, scoped by
+    Docker's OWN port-publish mapping rather than this process's bind
+    address. This is the ONE narrow case the wildcard refusal yields for,
+    and ONLY when the caller explicitly passes in_container=True -- never
+    inferred, never a default."""
+    assert is_permitted_bind_host("0.0.0.0", in_container=True)
+    assert is_permitted_bind_host("::", in_container=True)
+
+
+def test_in_container_flag_does_not_relax_public_address_refusal():
+    """in_container=True widens ONLY the wildcard case -- a literal public
+    address must still be refused even with the flag set."""
+    assert not is_permitted_bind_host("8.8.8.8", in_container=True)
+    assert not is_permitted_bind_host("1.1.1.1", in_container=True)
 
 
 def test_public_address_is_refused():

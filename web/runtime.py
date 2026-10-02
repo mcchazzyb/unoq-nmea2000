@@ -36,6 +36,14 @@ _BATCH_SIZE = 32
 #: Idle poll interval when a receiver's frames() generator is momentarily
 #: exhausted (e.g. between simulator cycles) -- avoids a busy-loop.
 _IDLE_POLL_S = 0.05
+#: How often `receiver.health()` is polled into the cache, INDEPENDENT of
+#: batch completion -- found via an actual deploy against real hardware
+#: with no CAN traffic on the bus: `_batched()` only yields once _BATCH_SIZE
+#: frames accumulate, so with zero traffic no batch EVER completes and
+#: cache.vessel.health is starved even though the receiver is genuinely
+#: polling correctly underneath. A separate timer thread, not tied to the
+#: frame-batching cadence, is the fix.
+_HEALTH_POLL_INTERVAL_S = 1.0
 
 
 class SimulatorReceiver:
@@ -86,13 +94,31 @@ def build_receiver(kind: str) -> ICanReceiver:
     if kind == "simulator":
         return SimulatorReceiver()
     if kind == "hardware":
-        # Imported lazily: the firmware package's Bridge client depends on
-        # `arduino.app_utils`, only importable inside the App Lab Python
-        # container on the actual board -- importing it eagerly would break
-        # `UNOQ_RECEIVER=simulator` on every host with no board attached.
-        from firmware.unoq_nmea2000_capture.python.bridge_receiver import (
-            ArduinoBridgeCanReceiver,
-        )
+        # Imported lazily: the Bridge client depends on `arduino.app_utils`,
+        # only importable inside the App Lab Python container on the actual
+        # board -- importing it eagerly would break `UNOQ_RECEIVER=simulator`
+        # on every host with no board attached.
+        #
+        # Two valid import locations, because this module is vendored into
+        # two different layouts (see bridge_receiver.py's DEPLOYMENT NOTE):
+        # on the HOST repo, the Bridge client lives at
+        # firmware/unoq_nmea2000_capture/python/bridge_receiver.py; inside
+        # the App Lab CONTAINER, this file itself is vendored to /app/web/
+        # runtime.py with bridge_receiver.py as a sibling at
+        # /app/python/bridge_receiver.py -- but `python/` there has no
+        # `__init__.py` (App Lab's own scaffold convention, confirmed by an
+        # actual deploy), so it is not an importable package by dotted
+        # name; insert /app/python onto sys.path directly instead and
+        # import the bare module name.
+        try:
+            import sys
+
+            sys.path.insert(0, "/app/python")
+            from bridge_receiver import ArduinoBridgeCanReceiver
+        except ImportError:
+            from firmware.unoq_nmea2000_capture.python.bridge_receiver import (
+                ArduinoBridgeCanReceiver,
+            )
 
         return ArduinoBridgeCanReceiver()
     raise ValueError(
@@ -134,15 +160,11 @@ def _run_loop(
     (IngestionService's own halt/stale path) to reflect the gap rather than
     a second, separate error path.
 
-    Also polls `receiver.health()` into `cache.vessel.health.can_health` on
-    every batch -- this is the ONLY place in the host codebase that ever
-    wrote that field before this module existed (`GET /api/v1/health`'s
-    `can_connected` previously always read None/False, since nothing fed
-    it; found and fixed while verifying this task's own live-server test).
+    Health is polled by a SEPARATE thread (`_health_poll_loop`), not here --
+    see `_HEALTH_POLL_INTERVAL_S`'s docstring for why batch-coupled polling
+    starves `cache.vessel.health` under real zero-traffic conditions.
     """
     from pathlib import Path
-
-    from protocol.domain import DeviceHealth
 
     capture_dir = Path(capture_dir)
     raw_log = RawCaptureLog(capture_dir)
@@ -161,12 +183,33 @@ def _run_loop(
                 if stop.is_set():
                     return
                 service.ingest_batch(batch)
-                if cache.vessel.health is None:
-                    cache.vessel.health = DeviceHealth()
-                cache.vessel.health.can_health = receiver.health()
         except Exception:  # noqa: BLE001 - deliberate: never let this thread die silently
             logger.exception("Live_Ingestion_Runtime: receiver loop raised; retrying")
             time.sleep(_IDLE_POLL_S)
+
+
+def _health_poll_loop(receiver: ICanReceiver, cache: LiveStateCache, stop: threading.Event) -> None:
+    """Polls `receiver.health()` into `cache.vessel.health.can_health` on a
+    FIXED timer, independent of the frame-batching loop (`_run_loop`) and
+    its data volume -- this is the ONLY place in the host codebase that
+    ever wrote that field before this module existed (`GET /api/v1/health`'s
+    `can_connected` previously always read None/False). Found and fixed in
+    two stages: first wiring it into the batch loop (worked under the
+    Simulator's constant traffic), then finding via an actual deploy
+    against real hardware with ZERO CAN traffic that batch-coupled polling
+    never fires at all when no batch ever completes -- a receiver can be
+    genuinely healthy and connected while reporting no frames yet.
+    """
+    from protocol.domain import DeviceHealth
+
+    while not stop.is_set():
+        try:
+            if cache.vessel.health is None:
+                cache.vessel.health = DeviceHealth()
+            cache.vessel.health.can_health = receiver.health()
+        except Exception:  # noqa: BLE001 - deliberate: health polling must never crash the process
+            logger.exception("Live_Ingestion_Runtime: health poll raised; retrying")
+        stop.wait(_HEALTH_POLL_INTERVAL_S)
 
 
 class LiveIngestionRuntime:
@@ -190,6 +233,7 @@ class LiveIngestionRuntime:
         self.receiver = receiver
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._health_thread: threading.Thread | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(
@@ -199,6 +243,13 @@ class LiveIngestionRuntime:
             daemon=True,  # Requirement 14.11: process exit is clean, no join required
         )
         self._thread.start()
+        self._health_thread = threading.Thread(
+            target=_health_poll_loop,
+            args=(self.receiver, self.cache, self._stop),
+            name="live-ingestion-runtime-health",
+            daemon=True,
+        )
+        self._health_thread.start()
 
     def stop(self) -> None:
         self._stop.set()

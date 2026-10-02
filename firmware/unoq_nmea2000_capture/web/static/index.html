@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>unoq-nmea2000 Diagnostic Dashboard</title>
+<style>
+  /* No build step: this stylesheet is the entire UI's layout logic.
+     Fluid grid/flex only, no fixed pixel widths above the 320px floor, so
+     the page never needs horizontal scroll from 320px to 1920px
+     (Requirement 15.3). Operate surface: a marine engineer glancing at this
+     under cockpit lighting needs scanability over decoration. */
+  :root {
+    --bg: #0a0c10;
+    --surface: #12151b;
+    --surface-raised: #171b23;
+    --border: #232832;
+    --text: #e7eaef;
+    --text-dim: #6b7280;
+    --text-mid: #9aa2b1;
+    --accent: #3ea6ff;
+    --stale: #d9a339;
+    --offline: #e0564f;
+    --online: #3ecf8e;
+    --mono: "SF Mono", "Berkeley Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-width: 320px;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent); color: #06111c; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.9rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 1.08rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-mid);
+  }
+  header h1 strong { color: var(--text); font-weight: 700; }
+
+  #conn-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    transition: background 300ms ease, border-color 300ms ease, color 300ms ease;
+  }
+  #conn-indicator::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 0 currentColor;
+    animation: pulse-dot 1.8s ease-out infinite;
+  }
+  @keyframes pulse-dot {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+    70% { box-shadow: 0 0 0 5px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  #conn-indicator.online { background: color-mix(in srgb, var(--online) 14%, transparent); color: var(--online); border-color: color-mix(in srgb, var(--online) 35%, transparent); }
+  #conn-indicator.stale { background: color-mix(in srgb, var(--stale) 14%, transparent); color: var(--stale); border-color: color-mix(in srgb, var(--stale) 35%, transparent); }
+  #conn-indicator.offline { background: color-mix(in srgb, var(--offline) 14%, transparent); color: var(--offline); border-color: color-mix(in srgb, var(--offline) 35%, transparent); }
+  #conn-indicator.offline::before { animation: pulse-dot 0.9s ease-out infinite; }
+
+  /* Mobile-first (Requirement 30.1): the base rule below is the PHONE
+     layout -- a single-column stack, which is the real primary usage
+     pattern (a boat owner holding a phone in a cockpit). The desktop/
+     tablet multi-column grid is the SECONDARY case, applied only behind
+     the min-width:768px rule further down. Never the other way around. */
+  main {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1px;
+    background: var(--border);
+    padding: 1px;
+  }
+  @media (min-width: 768px) {
+    main { grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+  }
+  section.panel {
+    background: var(--surface);
+    padding: 1.1rem 1.1rem 1.3rem;
+    min-width: 0;
+  }
+  section.panel h2 {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 0.9rem;
+    color: var(--text-dim);
+  }
+
+  .metric-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.42rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-label {
+    font-size: 0.86rem;
+    color: var(--text-mid);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .metric-value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    /* Sized for arm's-length outdoor reading (steering 13 / Requirement
+       30.1), not a desk under even lighting -- bumped from the original
+       1.38rem base. */
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    transition: color 400ms ease;
+  }
+  .metric-value .unit {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-dim);
+    margin-left: 0.25rem;
+    font-family: var(--sans);
+  }
+  .metric-value.is-unset { color: var(--text-dim); font-style: italic; font-weight: 400; }
+  .metric-value.is-stale { color: var(--stale); }
+  .metric-value.is-invalid { color: var(--offline); }
+  .metric-value.is-unknown-quality { color: var(--text-dim); }
+  .quality-badge {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+    vertical-align: middle;
+  }
+  .quality-badge.stale { color: var(--stale); background: color-mix(in srgb, var(--stale) 16%, transparent); }
+  .quality-badge.invalid { color: var(--offline); background: color-mix(in srgb, var(--offline) 16%, transparent); }
+  .quality-badge.unknown { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 16%, transparent); }
+  /* The one authored motion moment: a value that just changed gets a brief
+     accent flash, exponential ease-out from the already-visible color, so
+     fast-changing telemetry (RPM) reads as alive without a jarring replace
+     or a sparkline standing in for the number itself. */
+  .metric-value.just-updated { color: var(--accent); }
+  .metric-row.empty .metric-label { color: var(--text-dim); font-style: italic; }
+
+  table#discovery-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+  }
+  #discovery-table th {
+    text-align: left;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 0 0.6rem 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  #discovery-table td {
+    padding: 0.45rem 0.6rem 0.45rem 0;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 1px;
+    color: var(--text-mid);
+  }
+  #discovery-table td:first-child { color: var(--text); font-family: var(--mono); font-size: 0.86rem; }
+  #discovery-table tbody tr { cursor: pointer; transition: background 150ms ease; }
+  #discovery-table tbody tr:hover { background: var(--surface-raised); }
+  #discovery-table tbody tr:focus-visible { outline-offset: -2px; }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+  }
+  .status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-pill.online { color: var(--online); }
+  .status-pill.offline { color: var(--text-dim); }
+
+  #discovery-empty {
+    color: var(--text-dim);
+    font-size: 0.86rem;
+    padding: 1.1rem 0 0.3rem;
+    text-align: center;
+  }
+
+  #node-detail {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 220ms ease, transform 220ms ease;
+    visibility: hidden;
+    font-size: 0.86rem;
+  }
+  #node-detail.open {
+    max-height: 340px;
+    overflow-y: auto;
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+    margin-top: 0.8rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--border);
+  }
+  #node-detail pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--text-mid);
+    background: var(--bg);
+    padding: 0.7rem;
+    border-radius: 6px;
+    margin: 0;
+  }
+
+  .panel-wide { grid-column: 1 / -1; }
+
+  /* --- Stage 7.6: user-configurable multi-instance dashboard (Requirement 29) --- */
+
+  #dashboard-section { grid-column: 1 / -1; }
+
+  #selection-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 0.5rem 0.85rem;
+    border-radius: 7px;
+    cursor: pointer;
+    min-height: 44px;
+  }
+  #selection-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+
+  #unit-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+  }
+  #unit-toggle .unit-toggle-label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+  #unit-toggle button {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 0.5rem 0.75rem;
+    border-radius: 7px;
+    cursor: pointer;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  #unit-toggle button[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+    border-color: var(--accent);
+  }
+
+  #selection-panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem 1.1rem;
+    margin-bottom: 1px;
+  }
+  #selection-panel.open { display: block; }
+  #selection-panel h3 {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0.9rem 0 0.5rem;
+  }
+  #selection-panel h3:first-child { margin-top: 0; }
+
+  .instance-row { border-bottom: 1px solid var(--border); padding: 0.3rem 0; }
+  .instance-row:last-child { border-bottom: none; }
+  .instance-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 44px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  .instance-checkbox-label input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .instance-checkbox-label .instance-sub { color: var(--text-dim); font-size: 0.74rem; }
+
+  .attribute-checklist {
+    display: none;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.5rem 0 0.6rem 2rem;
+  }
+  .attribute-checklist.open { display: flex; }
+  .attribute-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 44px;
+    padding: 0 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-mid);
+    font-size: 0.78rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .attribute-chip input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .attribute-chip.checked { color: var(--text); border-color: var(--accent); }
+
+  #dashboard-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1px;
+    background: var(--border);
+  }
+  @media (min-width: 480px) {
+    #dashboard-cards { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  }
+  .dash-card {
+    background: var(--surface);
+    padding: 0.9rem 1rem 1.1rem;
+    min-width: 0;
+  }
+  .dash-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+  }
+  .dash-card-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text-mid);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dash-card-reorder { display: flex; gap: 0.25rem; }
+  .dash-card-reorder button {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .dash-card-reorder button:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+  .dash-card-reorder button:disabled { opacity: 0.35; cursor: default; }
+  .dash-card.card-is-stale { outline: 1px dashed color-mix(in srgb, var(--stale) 50%, transparent); }
+
+  .dash-card-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+  }
+  .dash-gauge-wrap, .dash-metric-wrap { flex: 1 1 110px; min-width: 110px; }
+
+  .dash-gauge-wrap { text-align: center; }
+  .dash-gauge-svg { width: 100%; max-width: 128px; height: auto; }
+  .dash-gauge-value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.05rem;
+    font-weight: 700;
+    fill: var(--text);
+  }
+  .dash-gauge-value.is-stale { fill: var(--stale); }
+  .dash-gauge-value.is-invalid { fill: var(--offline); }
+  .dash-gauge-label {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    margin-top: 0.2rem;
+    text-transform: capitalize;
+  }
+
+  .dash-metric-wrap .metric-label { font-size: 0.74rem; display: block; margin-bottom: 0.1rem; }
+  .dash-metric-wrap .metric-value { font-size: 1.1rem; display: block; }
+
+  #dashboard-empty {
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    padding: 1.4rem 1rem;
+    text-align: center;
+    background: var(--surface);
+  }
+  #dashboard-empty button {
+    display: inline-block;
+    margin-top: 0.6rem;
+    min-height: 44px;
+    padding: 0 1rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 7px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* Phone-portrait base already applies (Requirement 30.1); this rule only
+     tightens padding further at the narrowest end of the range. */
+  @media (max-width: 480px) {
+    header { padding: 0.8rem 1rem; }
+    section.panel { padding: 0.9rem; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><strong>unoq&#8209;nmea2000</strong> &middot; diagnostic dashboard</h1>
+  <span id="conn-indicator" class="offline">connecting</span>
+</header>
+
+<main>
+  <section class="panel panel-wide" id="dashboard-section">
+    <h2>My dashboard</h2>
+    <div id="unit-toggle" role="group" aria-label="Volume and flow display unit">
+      <span class="unit-toggle-label">Units:</span>
+      <button type="button" data-unit="litres" aria-pressed="true">Litres</button>
+      <button type="button" data-unit="us_gallons" aria-pressed="false">US gal</button>
+    </div>
+    <button id="selection-toggle" type="button" aria-expanded="false">Select sensors &amp; attributes</button>
+    <div id="selection-panel" aria-label="Sensor and attribute selection"></div>
+    <div id="dashboard-cards"></div>
+    <div id="dashboard-empty" style="display:none;">
+      No sensors selected yet.<br>
+      <button id="dashboard-empty-select" type="button">Select sensors to monitor</button>
+    </div>
+  </section>
+
+  <section class="panel" id="engine-panel">
+    <h2>Engine</h2>
+    <div id="engine-fields"></div>
+  </section>
+
+  <section class="panel" id="tank-panel">
+    <h2>Fuel &amp; tanks</h2>
+    <div id="tank-fields"></div>
+  </section>
+
+  <section class="panel" id="electrical-panel">
+    <h2>Electrical</h2>
+    <div id="electrical-fields"></div>
+  </section>
+
+  <section class="panel" id="navigation-panel">
+    <h2>Navigation</h2>
+    <div id="navigation-fields"></div>
+  </section>
+
+  <section class="panel panel-wide">
+    <h2>Network discovery</h2>
+    <table id="discovery-table">
+      <thead>
+        <tr><th>Node</th><th>Manufacturer</th><th>Device class</th><th>Product</th><th>PGNs</th><th>msg/s</th><th>Status</th></tr>
+      </thead>
+      <tbody id="discovery-rows"></tbody>
+    </table>
+    <div id="discovery-empty" style="display:none;">No nodes discovered yet.</div>
+    <div id="node-detail"></div>
+  </section>
+</main>
+
+<script>
+// Vanilla JS, no build step (Requirement 15.1). Consumes the Domain_Model
+// over WebSocket as the PRIMARY path -- a push drives a render immediately,
+// not on a client timer, so fast-changing values like RPM feel reactive
+// rather than once-per-second (the server already caps the actual
+// notification rate at one per 250ms per Requirement 14.2/27 -- the client
+// adds no further throttle on top of that). REST is the fallback path only,
+// used while no socket is open, so Requirement 15.2's "WebSocket OR REST"
+// is honored without double-polling once the socket is live.
+// Updates reflect within 1s of a cache change (Requirement 15.4) -- in
+// practice within one notification interval (<=250ms) while the socket is
+// connected. Makes NO outbound request after initial page load other than
+// same-origin calls to this platform's own API (Requirement 15.6).
+(function () {
+  "use strict";
+
+  const STALE_AFTER_MS = 3000;
+  const FLASH_DURATION_MS = 450;
+  let lastUpdateAt = 0;
+  let restPollTimer = null;
+  let wsConnected = false;
+  const previousValues = new Map();
+
+  function setConnIndicator(state) {
+    const el = document.getElementById("conn-indicator");
+    el.className = state;
+    el.textContent = state === "online" ? "live" : state;
+  }
+
+  function formatValue(key, value) {
+    if (typeof value === "number") {
+      if (Number.isInteger(value)) return value.toLocaleString();
+      return value.toFixed(2);
+    }
+    if (Array.isArray(value)) return value.map((v) => Number(v).toFixed(4)).join(", ");
+    return String(value);
+  }
+
+  const UNITS = {
+    rpm: "rpm", coolant_temp: "\u00b0C", oil_pressure: "Pa", alternator_voltage: "V",
+    fuel_rate: "L/h", engine_hours: "s", trim: "%",
+    level_percent: "%", capacity_litres: "L", quantity_remaining_litres: "L",
+    battery_voltage: "V", charging_voltage: "V", current: "A",
+    cog: "\u00b0", sog: "m/s", heading: "\u00b0", depth: "m", water_temp: "\u00b0C", wind: "m/s",
+  };
+
+  // --- Stage 7.11: display-only litres / US gallons toggle (Requirement 29.11, 29.12) ---
+  //
+  // PGN 127505 (Capacity) and PGN 127489 (Fuel rate) are litres / L-per-h on
+  // the wire per the NMEA 2000 standard unconditionally (Requirement 8.8) --
+  // a US-market sender configured in gallons by its own installer still
+  // converts to litres before transmitting, so the decoded/derived value is
+  // NEVER gallons. This toggle changes only what these three attributes
+  // display as; TankState/EngineState/Provenance are untouched.
+  const DISPLAY_UNIT_STORAGE_KEY = "unoq_display_unit_v1";
+  const LITRES_PER_US_GALLON = 3.785411784;
+  const VOLUME_OR_RATE_ATTRIBUTES = new Set(["capacity_litres", "quantity_remaining_litres", "fuel_rate"]);
+
+  function loadDisplayUnit() {
+    try {
+      const raw = localStorage.getItem(DISPLAY_UNIT_STORAGE_KEY);
+      return raw === "us_gallons" ? "us_gallons" : "litres"; // default litres
+    } catch (e) {
+      return "litres"; // corrupt/unavailable localStorage never breaks the page
+    }
+  }
+
+  function saveDisplayUnit(unit) {
+    try {
+      localStorage.setItem(DISPLAY_UNIT_STORAGE_KEY, unit === "us_gallons" ? "us_gallons" : "litres");
+    } catch (e) { /* storage unavailable -- choice just won't persist */ }
+  }
+
+  function setDisplayUnit(unit) {
+    saveDisplayUnit(unit);
+    renderSelectionPanel(latestLivePayload);
+    renderDashboard(latestLivePayload);
+    if (latestLivePayload) renderLive(latestLivePayload); // re-render legacy panels too
+  }
+
+  // Converts a stored litres/L-per-h value for DISPLAY ONLY. The returned
+  // `value`/`unit` never feed back into any stored config or domain state --
+  // callers format and discard them per render.
+  function formatVolumeOrRate(attribute, litresValue) {
+    const unit = loadDisplayUnit();
+    if (unit === "us_gallons") {
+      const converted = litresValue / LITRES_PER_US_GALLON;
+      const label = attribute === "fuel_rate" ? "gal/h" : "gal";
+      return { value: converted, label };
+    }
+    const label = attribute === "fuel_rate" ? "L/h" : "L";
+    return { value: litresValue, label };
+  }
+
+  // Attribute-aware unit label: delegates to formatVolumeOrRate for the three
+  // litres-denominated attributes, falls back to the static UNITS table for
+  // everything else (unaffected by the toggle).
+  function unitLabelFor(attribute) {
+    if (VOLUME_OR_RATE_ATTRIBUTES.has(attribute)) return formatVolumeOrRate(attribute, 0).label;
+    return UNITS[attribute] || "";
+  }
+
+  // Display-value-aware conversion: delegates to formatVolumeOrRate for the
+  // three litres-denominated attributes (returning the converted number),
+  // passes every other numeric value through unchanged.
+  function displayValueFor(attribute, rawValue) {
+    if (typeof rawValue === "number" && VOLUME_OR_RATE_ATTRIBUTES.has(attribute)) {
+      return formatVolumeOrRate(attribute, rawValue).value;
+    }
+    return rawValue;
+  }
+
+  // --- Stage 7.6: user-configurable multi-instance dashboard (Requirement 29) ---
+  //
+  // This is a SECOND VIEW over the exact same WebSocket/REST payload the
+  // panels above already render (Requirement 29.8) -- no second poll loop,
+  // no second staleness computation. `renderLive()` below calls both the
+  // legacy fixed panels (kept for the single-instance case) and
+  // `renderDashboard()`.
+
+  const DASHBOARD_STORAGE_KEY = "unoq_dashboard_config_v1";
+
+  // Attributes with a defined natural display range render as a dial
+  // (Requirement 29.4); everything else stays a metric row (Requirement 29.5).
+  // `max` for rpm/fuel_rate/depth is a per-card user override (stored on the
+  // card), defaulting to the value below.
+  const GAUGE_RANGES = {
+    level_percent: { min: 0, max: 100 },
+    rpm: { min: 0, max: 6000 },
+    coolant_temp: { min: 0, max: 120 },
+    oil_pressure: { min: 0, max: 700000 },
+    fuel_rate: { min: 0, max: 40 },
+    battery_voltage: { min: 0, max: 16 },
+    charging_voltage: { min: 0, max: 16 },
+    depth: { min: 0, max: 50 },
+    trim: { min: -100, max: 100 },
+    sog: { min: 0, max: 15 },
+  };
+
+  const ENTITY_ATTRIBUTES = {
+    engine: ["rpm", "coolant_temp", "oil_pressure", "alternator_voltage", "fuel_rate", "engine_hours", "trim"],
+    tank: ["fluid_type", "level_percent", "capacity_litres", "quantity_remaining_litres"],
+    electrical: ["battery_voltage", "charging_voltage", "current", "battery_state", "dc_source"],
+    navigation: ["position", "cog", "sog", "heading", "depth", "water_temp", "wind"],
+  };
+
+  let dashboardConfig = loadDashboardConfig();
+  let latestLivePayload = null; // most recent renderLive() data, for re-render on config change
+
+  function loadDashboardConfig() {
+    try {
+      const raw = localStorage.getItem(DASHBOARD_STORAGE_KEY);
+      if (!raw) return { schema_version: 1, cards: [] };
+      const parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.cards)) return { schema_version: 1, cards: [] };
+      return parsed;
+    } catch (e) {
+      return { schema_version: 1, cards: [] }; // corrupt localStorage never breaks the page
+    }
+  }
+
+  function saveDashboardConfig() {
+    try {
+      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(dashboardConfig));
+    } catch (e) { /* storage unavailable (private mode, quota) -- selection just won't persist */ }
+  }
+
+  function findCard(entityType, instanceKey) {
+    return dashboardConfig.cards.find((c) => c.entity_type === entityType && c.instance_key === instanceKey);
+  }
+
+  function listDiscoveredInstances(data) {
+    // Every entity instance currently present in the live payload, as a
+    // flat selectable list (Requirement 29.1) -- engine/tank distinguished
+    // by instance:source, electrical/navigation as fixed singletons.
+    const instances = [];
+    for (const key of Object.keys(data.engines || {})) {
+      instances.push({ entity_type: "engine", instance_key: key, label: "Engine " + key });
+    }
+    for (const key of Object.keys(data.tanks || {})) {
+      instances.push({ entity_type: "tank", instance_key: key, label: "Tank " + key });
+    }
+    if (data.electrical) instances.push({ entity_type: "electrical", instance_key: "electrical", label: "Electrical" });
+    if (data.navigation) instances.push({ entity_type: "navigation", instance_key: "navigation", label: "Navigation" });
+    return instances;
+  }
+
+  function lookupEntity(data, entityType, instanceKey) {
+    if (entityType === "engine") return (data.engines || {})[instanceKey] || null;
+    if (entityType === "tank") return (data.tanks || {})[instanceKey] || null;
+    if (entityType === "electrical") return data.electrical || null;
+    if (entityType === "navigation") return data.navigation || null;
+    return null;
+  }
+
+  function toggleInstanceSelected(entityType, instanceKey, checked) {
+    if (checked) {
+      if (!findCard(entityType, instanceKey)) {
+        dashboardConfig.cards.push({
+          entity_type: entityType,
+          instance_key: instanceKey,
+          attributes: [],
+          order: dashboardConfig.cards.length,
+        });
+      }
+    } else {
+      dashboardConfig.cards = dashboardConfig.cards.filter(
+        (c) => !(c.entity_type === entityType && c.instance_key === instanceKey)
+      );
+    }
+    saveDashboardConfig();
+    renderSelectionPanel(latestLivePayload);
+    renderDashboard(latestLivePayload);
+  }
+
+  function toggleAttributeSelected(entityType, instanceKey, attribute, checked) {
+    const card = findCard(entityType, instanceKey);
+    if (!card) return;
+    if (checked && !card.attributes.includes(attribute)) card.attributes.push(attribute);
+    if (!checked) card.attributes = card.attributes.filter((a) => a !== attribute);
+    saveDashboardConfig();
+    renderSelectionPanel(latestLivePayload);
+    renderDashboard(latestLivePayload);
+  }
+
+  function moveCard(entityType, instanceKey, direction) {
+    const sorted = [...dashboardConfig.cards].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((c) => c.entity_type === entityType && c.instance_key === instanceKey);
+    const swapIdx = idx + direction;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return;
+    [sorted[idx], sorted[swapIdx]] = [sorted[swapIdx], sorted[idx]];
+    sorted.forEach((c, i) => { c.order = i; });
+    dashboardConfig.cards = sorted;
+    saveDashboardConfig();
+    renderDashboard(latestLivePayload);
+  }
+
+  function renderSelectionPanel(data) {
+    const panel = document.getElementById("selection-panel");
+    if (!data) { panel.innerHTML = ""; return; }
+    const instances = listDiscoveredInstances(data);
+    if (instances.length === 0) {
+      panel.innerHTML = '<p style="color:var(--text-dim);font-size:0.84rem;margin:0.4rem 0;">Nothing discovered yet -- sensors will appear here once the platform observes them.</p>';
+      return;
+    }
+    let html = "";
+    for (const inst of instances) {
+      const card = findCard(inst.entity_type, inst.instance_key);
+      const checked = !!card;
+      const rowId = inst.entity_type + "-" + inst.instance_key;
+      html += `<div class="instance-row">
+        <label class="instance-checkbox-label">
+          <input type="checkbox" data-instance-toggle="${rowId}" ${checked ? "checked" : ""}>
+          ${inst.label}
+        </label>
+        <div class="attribute-checklist ${checked ? "open" : ""}" data-instance-attrs="${rowId}">`;
+      const attrs = ENTITY_ATTRIBUTES[inst.entity_type] || [];
+      for (const attr of attrs) {
+        const attrChecked = card ? card.attributes.includes(attr) : false;
+        html += `<label class="attribute-chip ${attrChecked ? "checked" : ""}">
+          <input type="checkbox" data-attr-toggle="${rowId}|${attr}" ${attrChecked ? "checked" : ""}>
+          ${attr.replace(/_/g, " ")}
+        </label>`;
+      }
+      html += `</div></div>`;
+    }
+    panel.innerHTML = html;
+
+    panel.querySelectorAll("[data-instance-toggle]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const [entityType, ...rest] = input.dataset.instanceToggle.split("-");
+        const instanceKey = rest.join("-");
+        toggleInstanceSelected(entityType, instanceKey, input.checked);
+      });
+    });
+    panel.querySelectorAll("[data-attr-toggle]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const [rowId, attr] = input.dataset.attrToggle.split("|");
+        const [entityType, ...rest] = rowId.split("-");
+        const instanceKey = rest.join("-");
+        toggleAttributeSelected(entityType, instanceKey, attr, input.checked);
+      });
+    });
+  }
+
+  function describeGaugeStroke(fraction) {
+    // Inline SVG arc, deliberately not canvas-library-based: a canvas that
+    // sizes itself from its container can feed back into the page's own
+    // layout and never settle. A fixed 100x100 viewBox has no such
+    // feedback path. 3/4-swept circle.
+    const circumference = 2 * Math.PI * 40;
+    const sweep = circumference * 0.75;
+    const dash = Math.max(0, Math.min(1, fraction)) * sweep;
+    return { circumference, sweep, dash };
+  }
+
+  function renderGauge(attribute, value, isUnset, qualityClass) {
+    const range = GAUGE_RANGES[attribute];
+    const fraction = isUnset || value === null ? 0 : (value - range.min) / (range.max - range.min);
+    const { sweep, dash } = describeGaugeStroke(fraction);
+    const displayValue = isUnset ? null : displayValueFor(attribute, value);
+    const display = isUnset ? "--" : formatValue(attribute, displayValue);
+    const unit = unitLabelFor(attribute);
+    return `<div class="dash-gauge-wrap">
+      <svg class="dash-gauge-svg" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)"
+          stroke-width="8" stroke-dasharray="${sweep} 999" stroke-linecap="round"
+          transform="rotate(135 50 50)"/>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--accent)"
+          stroke-width="8" stroke-dasharray="${dash} 999" stroke-linecap="round"
+          transform="rotate(135 50 50)"/>
+        <text x="50" y="54" text-anchor="middle" class="dash-gauge-value ${qualityClass}">${display}</text>
+      </svg>
+      <div class="dash-gauge-label">${attribute.replace(/_/g, " ")}${unit ? " (" + unit + ")" : ""}</div>
+    </div>`;
+  }
+
+  function renderMetricCell(attribute, value, isUnset, qualityClass) {
+    const unit = unitLabelFor(attribute) ? `<span class="unit">${unitLabelFor(attribute)}</span>` : "";
+    const displayValue = isUnset ? value : displayValueFor(attribute, value);
+    const display = isUnset ? "unset" : formatValue(attribute, displayValue) + unit;
+    const classes = ["metric-value"];
+    if (isUnset) classes.push("is-unset");
+    else classes.push(qualityClass);
+    return `<div class="dash-metric-wrap">
+      <span class="metric-label">${attribute.replace(/_/g, " ")}</span>
+      <span class="${classes.join(" ")}">${display}</span>
+    </div>`;
+  }
+
+  function renderDashboardCard(card, data) {
+    const entity = lookupEntity(data, card.entity_type, card.instance_key);
+    // Requirement 29.10: an instance no longer in the live payload keeps
+    // rendering its last-known values with stale styling, rather than the
+    // card disappearing.
+    const isStale = !entity;
+    const sourceEntity = entity || card._lastEntity || null;
+    if (entity) card._lastEntity = entity; // last-known snapshot kept on the in-memory card only
+
+    const title = card.entity_type.charAt(0).toUpperCase() + card.entity_type.slice(1) + " " + card.instance_key;
+    const sorted = [...dashboardConfig.cards].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((c) => c.entity_type === card.entity_type && c.instance_key === card.instance_key);
+
+    let bodyHtml = "";
+    if (!sourceEntity || card.attributes.length === 0) {
+      bodyHtml = '<p style="color:var(--text-dim);font-size:0.8rem;margin:0;">No attributes selected.</p>';
+    } else {
+      const provenance = sourceEntity.provenance || null;
+      const quality = provenance ? provenance.quality : null;
+      let qualityClass = "is-stale";
+      if (!isStale) {
+        if (quality === "invalid") qualityClass = "is-invalid";
+        else if (quality === "stale") qualityClass = "is-stale";
+        else if (quality === "unknown") qualityClass = "is-unknown-quality";
+        else qualityClass = "";
+      }
+      bodyHtml = '<div class="dash-card-grid">';
+      for (const attr of card.attributes) {
+        const value = sourceEntity[attr];
+        const isUnset = value === null || value === undefined;
+        bodyHtml += GAUGE_RANGES[attr]
+          ? renderGauge(attr, value, isUnset, qualityClass)
+          : renderMetricCell(attr, value, isUnset, qualityClass);
+      }
+      bodyHtml += "</div>";
+    }
+
+    return `<div class="dash-card${isStale ? " card-is-stale" : ""}">
+      <div class="dash-card-head">
+        <span class="dash-card-title">${title}${isStale ? " (stale)" : ""}</span>
+        <span class="dash-card-reorder">
+          <button type="button" data-move="${card.entity_type}|${card.instance_key}|-1" ${idx === 0 ? "disabled" : ""} aria-label="Move up">&uarr;</button>
+          <button type="button" data-move="${card.entity_type}|${card.instance_key}|1" ${idx === sorted.length - 1 ? "disabled" : ""} aria-label="Move down">&darr;</button>
+        </span>
+      </div>
+      ${bodyHtml}
+    </div>`;
+  }
+
+  function renderDashboard(data) {
+    const container = document.getElementById("dashboard-cards");
+    const emptyState = document.getElementById("dashboard-empty");
+    if (dashboardConfig.cards.length === 0) {
+      container.innerHTML = "";
+      emptyState.style.display = "block";
+      return;
+    }
+    emptyState.style.display = "none";
+    if (!data) { container.innerHTML = ""; return; }
+    const sorted = [...dashboardConfig.cards].sort((a, b) => a.order - b.order);
+    container.innerHTML = sorted.map((card) => renderDashboardCard(card, data)).join("");
+    container.querySelectorAll("[data-move]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const [entityType, instanceKey, direction] = btn.dataset.move.split("|");
+        moveCard(entityType, instanceKey, parseInt(direction, 10));
+      });
+    });
+  }
+
+  document.getElementById("selection-toggle").addEventListener("click", () => {
+    const panel = document.getElementById("selection-panel");
+    const btn = document.getElementById("selection-toggle");
+    const nowOpen = !panel.classList.contains("open");
+    panel.classList.toggle("open", nowOpen);
+    btn.setAttribute("aria-expanded", String(nowOpen));
+    if (nowOpen) renderSelectionPanel(latestLivePayload);
+  });
+  document.getElementById("dashboard-empty-select").addEventListener("click", () => {
+    document.getElementById("selection-panel").classList.add("open");
+    document.getElementById("selection-toggle").setAttribute("aria-expanded", "true");
+    renderSelectionPanel(latestLivePayload);
+  });
+
+  // --- end Stage 7.6 ---
+
+  function renderEntityFields(containerId, entity, fieldOrder, entityKeyPrefix) {
+    const container = document.getElementById(containerId);
+    if (!entity) {
+      container.innerHTML = '<div class="metric-row empty"><span class="metric-label">No data yet</span></div>';
+      return;
+    }
+    // Transport-level staleness (socket/REST hasn't delivered a push
+    // recently) is a DIFFERENT signal from the per-value quality/staleness
+    // this entity's own Provenance carries (Requirement 20.6) -- a push
+    // can arrive on schedule while still reporting a stale/invalid/unknown
+    // SOURCE value (e.g. CAPTURE_HALTED_STORAGE_FULL serving the last
+    // known state, or a node gone offline). Both are surfaced, not
+    // collapsed into one flag.
+    const transportStale = (Date.now() - lastUpdateAt) > STALE_AFTER_MS;
+    const provenance = entity.provenance || null;
+    const quality = provenance ? provenance.quality : null;
+    const staleness = provenance ? provenance.staleness_s : null;
+    let html = "";
+    for (const key of fieldOrder) {
+      const value = entity[key];
+      const isUnset = value === null || value === undefined;
+      const trackKey = entityKeyPrefix + ":" + key;
+      const prevValue = previousValues.get(trackKey);
+      const changed = !isUnset && prevValue !== undefined && prevValue !== value;
+      previousValues.set(trackKey, value);
+
+      const unit = unitLabelFor(key) ? `<span class="unit">${unitLabelFor(key)}</span>` : "";
+      const displayValue = isUnset ? value : displayValueFor(key, value);
+      const display = isUnset ? "unset" : formatValue(key, displayValue) + unit;
+      const classes = ["metric-value"];
+      if (isUnset) classes.push("is-unset");
+      else if (quality === "invalid") classes.push("is-invalid");
+      else if (quality === "stale" || transportStale) classes.push("is-stale");
+      else if (quality === "unknown") classes.push("is-unknown-quality");
+      else if (changed) classes.push("just-updated");
+
+      // Per-value quality badge, distinct from the row's own value styling,
+      // so a stale/invalid/unknown-quality value is distinguishable from
+      // current valid data at a glance even when it's not UNSET
+      // (Requirement 20.6) -- an entity CAN be stale while individual
+      // fields still hold their last-decoded numbers.
+      let badge = "";
+      if (!isUnset && quality && quality !== "valid") {
+        const badgeClass = quality === "invalid" ? "invalid" : quality === "stale" ? "stale" : "unknown";
+        const ageLabel = typeof staleness === "number" ? ` ${staleness.toFixed(1)}s` : "";
+        badge = `<span class="quality-badge ${badgeClass}" title="Provenance quality: ${quality}${ageLabel ? ', age' + ageLabel : ''}">${quality}${ageLabel}</span>`;
+      }
+
+      html += `<div class="metric-row"><span class="metric-label">${key.replace(/_/g, " ")}</span><span class="${classes.join(" ")}" data-track="${trackKey}">${display}${badge}</span></div>`;
+    }
+    container.innerHTML = html;
+
+    // Clear the "just-updated" accent after the authored flash duration so
+    // it reads as a pulse on change, not a permanent recolor.
+    if (!transportStale) {
+      container.querySelectorAll(".just-updated").forEach((el) => {
+        setTimeout(() => el.classList.remove("just-updated"), FLASH_DURATION_MS);
+      });
+    }
+  }
+
+  function renderLive(data) {
+    latestLivePayload = data; // Stage 7.6: feeds the dashboard cards too (Requirement 29.8)
+
+    const engineKeys = Object.keys(data.engines || {});
+    if (engineKeys.length === 0) {
+      document.getElementById("engine-fields").innerHTML = '<div class="metric-row empty"><span class="metric-label">No engine data yet</span></div>';
+    } else {
+      renderEntityFields("engine-fields", data.engines[engineKeys[0]],
+        ["rpm", "coolant_temp", "oil_pressure", "alternator_voltage", "fuel_rate", "engine_hours", "trim"],
+        "engine:" + engineKeys[0]);
+    }
+
+    const tankKeys = Object.keys(data.tanks || {});
+    if (tankKeys.length === 0) {
+      document.getElementById("tank-fields").innerHTML = '<div class="metric-row empty"><span class="metric-label">No tank data yet</span></div>';
+    } else {
+      renderEntityFields("tank-fields", data.tanks[tankKeys[0]],
+        ["fluid_type", "level_percent", "capacity_litres", "quantity_remaining_litres"],
+        "tank:" + tankKeys[0]);
+    }
+
+    renderEntityFields("electrical-fields", data.electrical,
+      ["battery_voltage", "charging_voltage", "current", "battery_state", "dc_source"], "electrical");
+    renderEntityFields("navigation-fields", data.navigation,
+      ["position", "cog", "sog", "heading", "depth", "water_temp", "wind"], "navigation");
+
+    lastUpdateAt = Date.now();
+    setConnIndicator(data.stale ? "stale" : "online");
+    renderDashboard(data); // Stage 7.6
+  }
+
+  function renderDiscoveryEmpty() {
+    document.getElementById("discovery-rows").innerHTML = "";
+    document.getElementById("discovery-empty").style.display = "block";
+  }
+
+  function renderDiscovery(nodes) {
+    const rows = document.getElementById("discovery-rows");
+    const allNodes = (nodes.known || []).concat(nodes.unknown || []);
+    if (allNodes.length === 0) {
+      renderDiscoveryEmpty();
+      return;
+    }
+    document.getElementById("discovery-empty").style.display = "none";
+    rows.innerHTML = "";
+    for (const node of allNodes) {
+      const tr = document.createElement("tr");
+      tr.tabIndex = 0;
+      tr.dataset.nodeKey = node.node_key;
+      const manufacturer = node.manufacturer_code ?? "\u2014";
+      const deviceClass = node.device_class ?? "\u2014";
+      const product = node.product_info || "\u2014";
+      const pgns = node.observed_pgns ? node.observed_pgns.join(", ") : "\u2014";
+      const rate = node.message_rate ?? 0;
+      const statusClass = node.online ? "online" : "offline";
+      const statusLabel = node.online ? "online" : "offline";
+      tr.innerHTML = `<td>${node.node_key}</td><td>${manufacturer}</td><td>${deviceClass}</td><td>${product}</td><td>${pgns}</td><td>${rate}</td><td><span class="status-pill ${statusClass}">${statusLabel}</span></td>`;
+      tr.addEventListener("click", () => selectNode(node));
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") selectNode(node); });
+      rows.appendChild(tr);
+    }
+  }
+
+  function selectNode(node) {
+    const detail = document.getElementById("node-detail");
+    detail.classList.add("open");
+    detail.innerHTML = `<strong>${node.node_key}</strong><pre>${JSON.stringify(node, null, 2)}</pre>`;
+  }
+
+  function connectWebSocket() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    let ws;
+    try {
+      ws = new WebSocket(`${proto}//${location.host}/api/v1/live/ws`);
+    } catch (e) {
+      startRestFallback();
+      return;
+    }
+    ws.onmessage = (event) => {
+      try {
+        renderLive(JSON.parse(event.data));
+      } catch (e) { /* malformed push ignored, next push recovers */ }
+    };
+    ws.onopen = () => {
+      wsConnected = true;
+      stopRestFallback(); // socket is the primary path once it's live
+      ws.send("hello");
+    };
+    ws.onclose = () => {
+      wsConnected = false;
+      setConnIndicator("offline");
+      startRestFallback();
+      setTimeout(connectWebSocket, 2000);
+    };
+    ws.onerror = () => ws.close();
+  }
+
+  async function pollRestFallback() {
+    if (wsConnected) return; // socket already serving; no double-push
+    try {
+      const response = await fetch("/api/v1/live");
+      if (response.ok) renderLive(await response.json());
+    } catch (e) { setConnIndicator("offline"); }
+  }
+
+  function startRestFallback() {
+    if (restPollTimer) return;
+    pollRestFallback();
+    restPollTimer = setInterval(pollRestFallback, 1000);
+  }
+
+  function stopRestFallback() {
+    if (restPollTimer) { clearInterval(restPollTimer); restPollTimer = null; }
+  }
+
+  // Discovery view updates at a human-readable 1s cadence regardless of the
+  // live-telemetry transport -- node inventory does not need push latency.
+  async function pollDiscovery() {
+    try {
+      const response = await fetch("/api/v1/nodes");
+      if (response.ok) renderDiscovery(await response.json());
+    } catch (e) { /* discovery view just stays as last-known */ }
+  }
+  pollDiscovery();
+  setInterval(pollDiscovery, 1000);
+
+  startRestFallback();
+  connectWebSocket();
+  renderDashboard(null); // Stage 7.6: show empty state immediately, before first payload
+
+  // Stage 7.11: display-only litres/US gallons toggle (Requirement 29.11, 29.12)
+  (function initUnitToggle() {
+    const buttons = document.querySelectorAll("#unit-toggle button[data-unit]");
+    const current = loadDisplayUnit();
+    buttons.forEach((btn) => {
+      btn.setAttribute("aria-pressed", btn.dataset.unit === current ? "true" : "false");
+      btn.addEventListener("click", () => {
+        setDisplayUnit(btn.dataset.unit);
+        buttons.forEach((b) => b.setAttribute("aria-pressed", b.dataset.unit === btn.dataset.unit ? "true" : "false"));
+      });
+    });
+  })();
+})();
+</script>
+</body>
+</html>
