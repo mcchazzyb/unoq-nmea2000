@@ -68,3 +68,25 @@ TankState(
     ...
 )
 ```
+
+## Wire units are litres, unconditionally — no gallons path (Requirement 8.8)
+
+PGN 127505's `Capacity` field, and PGN 127489's `Fuel rate` field, are
+defined by the NMEA 2000 standard in **litres** and **litres-per-hour**
+respectively, on the wire, regardless of which country's hardware is
+transmitting. A US-market tank sender or engine interface that lets its
+*installer* configure the tank size in US gallons still performs the
+gallon-to-litre conversion internally, inside the sender/gateway, before
+the value is ever broadcast on the bus — this platform only ever sees
+the already-converted litres value and performs **no unit conversion at
+decode time**. `capacity_litres`, `quantity_remaining_litres`, and
+`fuel_rate` are therefore always litres-denominated in `TankState` and
+`EngineState`, with no ambiguity to resolve in `protocol/decoders/`.
+
+The Web_UI's dashboard (Stage 7.11) offers a **display-only** litres/US
+gallons toggle for exactly these three attributes, purely for a reader who
+thinks in gallons — it converts the number and label at render time only
+(`1 US gal = 3.785411784 L`) and never touches the decoded/derived value,
+its `Provenance`, or the `(level_percent / 100) * capacity_litres`
+derivation text above, which remain litres-denominated no matter which
+display unit is selected.

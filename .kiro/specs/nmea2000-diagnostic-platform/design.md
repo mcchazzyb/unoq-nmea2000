@@ -581,6 +581,28 @@ Attributes outside this table (`position`, `status`, `dc_source`, `battery_state
 
 **Stale/vanished instance (Requirement 29.10):** a card's `instance_key` is looked up in the latest payload on each render tick; if absent, the card keeps rendering its last-received values with the existing `.is-stale`/quality-badge styling rather than disappearing — consistent with how the rest of the UI treats staleness, and avoiding a surprising "my gauge vanished" experience when a sensor drops out briefly.
 
+**Display unit toggle for volume/flow (Requirements 29.11, 29.12):** NMEA 2000 PGN 127505 (Capacity) and PGN 127489 (Fuel rate) are defined by the standard in litres and litres-per-hour on the wire unconditionally — a US-market tank sender or engine interface configured in gallons by its own installer still converts to litres internally before transmitting, so the Platform never receives gallons and performs no unit math at decode time (Requirement 8.8). The ambiguity is purely in how a reader *thinks* about the number, not in what the wire carries. The Web_UI adds a two-state toggle (`L` / `US gal`) in the dashboard's settings area:
+
+```js
+// Persisted alongside the dashboard config, same localStorage key family,
+// never transmitted (Requirement 29.12, steering 12).
+const DISPLAY_UNIT_STORAGE_KEY = "unoq_display_unit_v1"; // "litres" | "us_gallons"
+const LITRES_PER_US_GALLON = 3.785411784;
+
+function formatVolumeOrRate(attribute, litresValue) {
+  const unit = loadDisplayUnit(); // "litres" (default) | "us_gallons"
+  if (unit === "us_gallons") {
+    const converted = litresValue / LITRES_PER_US_GALLON;
+    const label = attribute === "fuel_rate" ? "gal/h" : "gal";
+    return { value: converted, label };
+  }
+  const label = attribute === "fuel_rate" ? "L/h" : "L";
+  return { value: litresValue, label };
+}
+```
+
+This touches only `capacity_litres`, `quantity_remaining_litres`, and `fuel_rate`'s *rendering* — `formatVolumeOrRate` is called from the existing gauge/metric-row renderer in place of the current `UNITS[attribute]` lookup for those three keys only, converting at display time. `TankState`, `EngineState`, their Provenance, and the `(level_percent / 100) * capacity_litres` derivation text all stay litres-denominated, unchanged, matching Requirement 8.8 and the project's single-source-of-truth rule for Provenance (steering 06): the stored/derived value is never gallons, only its on-screen label and number are.
+
 ### Mobile-First Design and LAN Testing Access (Requirement 30)
 
 The Web_UI was built responsive (320-1920px, Requirement 15.3) but desktop-first in practice: a CSS grid that reflows down to a phone width rather than a layout actually designed for one-handed cockpit use. Requirement 30 reverses that priority without discarding the existing responsive range.

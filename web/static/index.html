@@ -282,6 +282,34 @@
   }
   #selection-toggle:hover { color: var(--text); border-color: var(--text-dim); }
 
+  #unit-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+  }
+  #unit-toggle .unit-toggle-label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+  #unit-toggle button {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 0.5rem 0.75rem;
+    border-radius: 7px;
+    cursor: pointer;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  #unit-toggle button[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--on-accent, #fff);
+    border-color: var(--accent);
+  }
+
   #selection-panel {
     display: none;
     background: var(--surface);
@@ -460,6 +488,11 @@
 <main>
   <section class="panel panel-wide" id="dashboard-section">
     <h2>My dashboard</h2>
+    <div id="unit-toggle" role="group" aria-label="Volume and flow display unit">
+      <span class="unit-toggle-label">Units:</span>
+      <button type="button" data-unit="litres" aria-pressed="true">Litres</button>
+      <button type="button" data-unit="us_gallons" aria-pressed="false">US gal</button>
+    </div>
     <button id="selection-toggle" type="button" aria-expanded="false">Select sensors &amp; attributes</button>
     <div id="selection-panel" aria-label="Sensor and attribute selection"></div>
     <div id="dashboard-cards"></div>
@@ -548,6 +581,72 @@
     cog: "\u00b0", sog: "m/s", heading: "\u00b0", depth: "m", water_temp: "\u00b0C", wind: "m/s",
   };
 
+  // --- Stage 7.11: display-only litres / US gallons toggle (Requirement 29.11, 29.12) ---
+  //
+  // PGN 127505 (Capacity) and PGN 127489 (Fuel rate) are litres / L-per-h on
+  // the wire per the NMEA 2000 standard unconditionally (Requirement 8.8) --
+  // a US-market sender configured in gallons by its own installer still
+  // converts to litres before transmitting, so the decoded/derived value is
+  // NEVER gallons. This toggle changes only what these three attributes
+  // display as; TankState/EngineState/Provenance are untouched.
+  const DISPLAY_UNIT_STORAGE_KEY = "unoq_display_unit_v1";
+  const LITRES_PER_US_GALLON = 3.785411784;
+  const VOLUME_OR_RATE_ATTRIBUTES = new Set(["capacity_litres", "quantity_remaining_litres", "fuel_rate"]);
+
+  function loadDisplayUnit() {
+    try {
+      const raw = localStorage.getItem(DISPLAY_UNIT_STORAGE_KEY);
+      return raw === "us_gallons" ? "us_gallons" : "litres"; // default litres
+    } catch (e) {
+      return "litres"; // corrupt/unavailable localStorage never breaks the page
+    }
+  }
+
+  function saveDisplayUnit(unit) {
+    try {
+      localStorage.setItem(DISPLAY_UNIT_STORAGE_KEY, unit === "us_gallons" ? "us_gallons" : "litres");
+    } catch (e) { /* storage unavailable -- choice just won't persist */ }
+  }
+
+  function setDisplayUnit(unit) {
+    saveDisplayUnit(unit);
+    renderSelectionPanel(latestLivePayload);
+    renderDashboard(latestLivePayload);
+    if (latestLivePayload) renderLive(latestLivePayload); // re-render legacy panels too
+  }
+
+  // Converts a stored litres/L-per-h value for DISPLAY ONLY. The returned
+  // `value`/`unit` never feed back into any stored config or domain state --
+  // callers format and discard them per render.
+  function formatVolumeOrRate(attribute, litresValue) {
+    const unit = loadDisplayUnit();
+    if (unit === "us_gallons") {
+      const converted = litresValue / LITRES_PER_US_GALLON;
+      const label = attribute === "fuel_rate" ? "gal/h" : "gal";
+      return { value: converted, label };
+    }
+    const label = attribute === "fuel_rate" ? "L/h" : "L";
+    return { value: litresValue, label };
+  }
+
+  // Attribute-aware unit label: delegates to formatVolumeOrRate for the three
+  // litres-denominated attributes, falls back to the static UNITS table for
+  // everything else (unaffected by the toggle).
+  function unitLabelFor(attribute) {
+    if (VOLUME_OR_RATE_ATTRIBUTES.has(attribute)) return formatVolumeOrRate(attribute, 0).label;
+    return UNITS[attribute] || "";
+  }
+
+  // Display-value-aware conversion: delegates to formatVolumeOrRate for the
+  // three litres-denominated attributes (returning the converted number),
+  // passes every other numeric value through unchanged.
+  function displayValueFor(attribute, rawValue) {
+    if (typeof rawValue === "number" && VOLUME_OR_RATE_ATTRIBUTES.has(attribute)) {
+      return formatVolumeOrRate(attribute, rawValue).value;
+    }
+    return rawValue;
+  }
+
   // --- Stage 7.6: user-configurable multi-instance dashboard (Requirement 29) ---
   //
   // This is a SECOND VIEW over the exact same WebSocket/REST payload the
@@ -571,6 +670,8 @@
     battery_voltage: { min: 0, max: 16 },
     charging_voltage: { min: 0, max: 16 },
     depth: { min: 0, max: 50 },
+    trim: { min: -100, max: 100 },
+    sog: { min: 0, max: 15 },
   };
 
   const ENTITY_ATTRIBUTES = {
@@ -734,8 +835,9 @@
     const range = GAUGE_RANGES[attribute];
     const fraction = isUnset || value === null ? 0 : (value - range.min) / (range.max - range.min);
     const { sweep, dash } = describeGaugeStroke(fraction);
-    const display = isUnset ? "--" : formatValue(attribute, value);
-    const unit = UNITS[attribute] || "";
+    const displayValue = isUnset ? null : displayValueFor(attribute, value);
+    const display = isUnset ? "--" : formatValue(attribute, displayValue);
+    const unit = unitLabelFor(attribute);
     return `<div class="dash-gauge-wrap">
       <svg class="dash-gauge-svg" viewBox="0 0 100 100">
         <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)"
@@ -751,8 +853,9 @@
   }
 
   function renderMetricCell(attribute, value, isUnset, qualityClass) {
-    const unit = UNITS[attribute] ? `<span class="unit">${UNITS[attribute]}</span>` : "";
-    const display = isUnset ? "unset" : formatValue(attribute, value) + unit;
+    const unit = unitLabelFor(attribute) ? `<span class="unit">${unitLabelFor(attribute)}</span>` : "";
+    const displayValue = isUnset ? value : displayValueFor(attribute, value);
+    const display = isUnset ? "unset" : formatValue(attribute, displayValue) + unit;
     const classes = ["metric-value"];
     if (isUnset) classes.push("is-unset");
     else classes.push(qualityClass);
@@ -873,8 +976,9 @@
       const changed = !isUnset && prevValue !== undefined && prevValue !== value;
       previousValues.set(trackKey, value);
 
-      const unit = UNITS[key] ? `<span class="unit">${UNITS[key]}</span>` : "";
-      const display = isUnset ? "unset" : formatValue(key, value) + unit;
+      const unit = unitLabelFor(key) ? `<span class="unit">${unitLabelFor(key)}</span>` : "";
+      const displayValue = isUnset ? value : displayValueFor(key, value);
+      const display = isUnset ? "unset" : formatValue(key, displayValue) + unit;
       const classes = ["metric-value"];
       if (isUnset) classes.push("is-unset");
       else if (quality === "invalid") classes.push("is-invalid");
@@ -1036,6 +1140,19 @@
   startRestFallback();
   connectWebSocket();
   renderDashboard(null); // Stage 7.6: show empty state immediately, before first payload
+
+  // Stage 7.11: display-only litres/US gallons toggle (Requirement 29.11, 29.12)
+  (function initUnitToggle() {
+    const buttons = document.querySelectorAll("#unit-toggle button[data-unit]");
+    const current = loadDisplayUnit();
+    buttons.forEach((btn) => {
+      btn.setAttribute("aria-pressed", btn.dataset.unit === current ? "true" : "false");
+      btn.addEventListener("click", () => {
+        setDisplayUnit(btn.dataset.unit);
+        buttons.forEach((b) => b.setAttribute("aria-pressed", b.dataset.unit === btn.dataset.unit ? "true" : "false"));
+      });
+    });
+  })();
 })();
 </script>
 </body>

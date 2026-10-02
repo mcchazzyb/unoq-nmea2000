@@ -472,6 +472,42 @@ properties (Properties 1-39 in design.md) it proves.
   - Run `make test lint run-api`
   - _Validates: Property 41; Requirements 14.3, 30.1-30.6_
 
+- [x] 7.11 Display-only litres/US gallons toggle for volume and flow attributes
+  - Add a two-state toggle (`L` / `US gal`) to the dashboard area, persisted to
+    `localStorage` under its own key, read once on load and defaulting to litres
+    (_Requirement 29.11, 29.12_)
+  - Implement `formatVolumeOrRate(attribute, litresValue)` applied only to
+    `capacity_litres`, `quantity_remaining_litres`, and `fuel_rate` at render time in
+    the gauge/metric-row renderer and the legacy tank/engine panels, converting
+    litres/L-per-h to US gallons/US-gal-per-h for display using 3.785411784
+    litres-per-US-gallon; every other attribute's rendering is unaffected
+    (_Requirement 29.11_)
+  - Make no change to `protocol/decoders/tank.py`, `protocol/decoders/engine.py`,
+    `protocol/domain.py`, Provenance, or the `(level_percent / 100) * capacity_litres`
+    derivation text — confirm via test that the stored/decoded value and its
+    derivation stay litres-denominated regardless of the selected display unit
+    (_Requirement 8.8, 29.11_)
+  - Document on `docs/tank-data.md` (and `docs/architecture.md`'s Web_UI section if it
+    lists units) that PGN 127505/127489 are litres/L-per-h on the wire per the NMEA
+    2000 standard unconditionally, so a sender configured in gallons by its installer
+    still transmits litres and the Platform performs no wire-side conversion
+    (_Requirement 8.8_)
+  - _Requirements: 8.8, 29.11, 29.12_
+
+- [x] 7.12 Stage Gate — display unit toggle
+  - DOM/unit tests: toggling to US gallons changes the displayed number and label for
+    `capacity_litres`/`quantity_remaining_litres`/`fuel_rate` only, leaves every other
+    attribute's displayed label/value unchanged, and the choice survives a simulated
+    reload (localStorage round-trip); toggling back to litres restores the original
+    displayed values exactly
+  - Unit test: `formatVolumeOrRate` round-trips a known litres value through the
+    gallons conversion and back within floating-point tolerance
+  - Test confirming `TankState.capacity_litres`/`quantity_remaining_litres` and
+    `EngineState.fuel_rate` are unaffected by the display unit setting (decode path has
+    no dependency on it)
+  - Run `make test lint run-api`
+  - _Validates: Requirements 8.8, 29.11, 29.12_
+
 ## Stage 8 — Host-stack hardening and sign-off
 
 - [x] 8.1 Capture promotion to golden fixtures

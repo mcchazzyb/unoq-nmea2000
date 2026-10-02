@@ -80,6 +80,7 @@ class DF140SmokeTestScenario:
     longitude_deg: float = -1.9870
     sog_knots: float = 22.4
     cog_deg: float = 95.0
+    trim_percent: float = -5.0  # plausible negative (bow-up) outboard trim angle
 
     def frames(self) -> list[CanFrame]:
         """Return the raw CAN frames for one reporting cycle of this scenario.
@@ -94,7 +95,7 @@ class DF140SmokeTestScenario:
         # PGN 127488 Engine Rapid Update (single frame, engine source)
         rpm_raw = round(self.engine_rpm / 0.25)
         boost_raw = 0xFFFF  # not available on an outboard without a turbo
-        trim_raw = 0x7F  # tilt/trim not available in this scenario
+        trim_raw = round(self.trim_percent)  # signed %, 1-unit resolution, 0x7F = N/A
         payload_488 = bytes(
             [0x00]
         ) + struct.pack("<HHb", rpm_raw, boost_raw, trim_raw) + bytes([0xFF, 0xFF])

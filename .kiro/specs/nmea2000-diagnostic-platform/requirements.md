@@ -154,6 +154,7 @@ This document defines requirements only (the "what"). Architecture and implement
 5. IF a PGN 127505 field carries an invalid or reserved value, or IF a decoded level_percent value falls outside the range 0 through 100 inclusive, THEN THE Platform SHALL leave the corresponding TankState field unset, distinguishable from a decoded value of zero.
 6. WHEN both level_percent and capacity_litres are available, THE Platform SHALL compute quantity_remaining_litres as a derived value and SHALL mark its Value_Origin as "derived" recording the derivation ((level_percent / 100) x capacity_litres); IF either input is unset, THEN quantity_remaining_litres SHALL be unset.
 7. THE Platform SHALL mark directly-decoded TankState fields with Value_Origin "decoded".
+8. THE Platform SHALL treat capacity_litres (PGN 127505) and fuel_rate (PGN 127489) as already expressed in litres and litres-per-hour on the wire per the NMEA 2000 standard, regardless of whether the transmitting sender/gateway's own installer configuration uses gallons internally; THE Platform SHALL perform no unit conversion at decode time, since any gallon-to-litre conversion is the responsibility of the transmitting device before the value reaches the bus.
 
 ### Requirement 9: Electrical and Navigation Decoding
 
@@ -443,6 +444,8 @@ This document defines requirements only (the "what"). Architecture and implement
 8. THE Web_UI SHALL update each rendered gauge and metric in place, consuming the same Live_State_Cache data and the same staleness/quality Provenance markers as every other dashboard view (_Requirement 6.6, 20.6_), so a selected/arranged dashboard is never a second, inconsistent data path.
 9. WHILE no entity instances are selected, THE Web_UI SHALL display an empty-state indicator in the dashboard area directing the user to the selection view, distinct from the discovery view's own empty-state indicator (_Requirement 15.9_).
 10. WHEN a previously selected entity instance stops being discovered (for example its NodeKey goes offline or its instance key disappears from the Live_State_Cache), THE Web_UI SHALL continue displaying its card using the last known values marked stale, consistent with the staleness handling in Requirement 20.6, rather than silently removing the user's selection.
+11. THE Web_UI SHALL provide a display-only unit toggle for volume and flow-rate attributes (capacity_litres, quantity_remaining_litres, fuel_rate), allowing the user to view them in US gallons / US gallons-per-hour as an alternative to litres / litres-per-hour, WHERE the underlying decoded and persisted value (TankState, EngineState, Provenance, derivation text) SHALL remain in litres unchanged; the toggle SHALL affect only the rendered display label and number, never the Domain_Model, the API payload, or the stored localStorage configuration value.
+12. THE Web_UI SHALL persist the user's chosen display unit (litres or US gallons) in the same local-only configuration mechanism as Requirement 29.7, so the choice survives a page reload without transmitting it off the device.
 
 ### Requirement 30: Mobile-First Rendering and LAN Testing Access
 
