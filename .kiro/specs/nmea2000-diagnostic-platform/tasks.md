@@ -652,6 +652,21 @@ properties (Properties 1-39 in design.md) it proves.
     dropped=0 errors=0`, repeating steadily over the real Bridge RPC. CS pin (D10, P2 shunt)
     confirmed against the physical shield. Board stayed bench-isolated throughout (no Backbone
     connection) — that step is gated separately by 9.2 below, which is NOT yet satisfied.
+  - **Extended 2026-10-02 (same day, follow-up):** the real Web_API/Web_UI/Ingestion_Service
+    stack (not just the verification stub above) now runs on the board itself, replacing the
+    stub app — `UNOQ_RECEIVER=hardware` wires `ArduinoBridgeCanReceiver` into the Stage 7.13
+    Live_Ingestion_Runtime for real (Requirement 14.10 applied to real hardware, not just the
+    Simulator). Found and fixed two more real bugs via the actual deploy: a container-aware
+    bind-host exception (`UNOQ_IN_CONTAINER=1`, documented and tested as security-relevant per
+    steering 13 — App Lab's Docker container cannot bind the host's own LAN IP, only its own
+    0.0.0.0 scoped by Docker's port-publish mapping) and a health-polling bug where zero CAN
+    traffic on the bus meant no frame batch ever completed, starving `cache.vessel.health`
+    despite the receiver being genuinely connected — fixed with an independent health-poll
+    timer thread. Verified end-to-end from a laptop on the same LAN: `http://192.168.201.129:
+    8000/api/v1/health` reports `can_connected: true`, `/` serves the real mobile-first page,
+    `/api/v1/live`/`/api/v1/nodes` respond — the same path a phone on the WiFi would take.
+    Board remained bench-isolated (no Backbone connection) throughout, consistent with 9.2
+    still being open below.
 
 - [~] 9.2 Stage Gate — bench validation of the silent-mode fail-safe (before any Backbone
       connection)
