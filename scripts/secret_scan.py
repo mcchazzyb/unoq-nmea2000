@@ -40,6 +40,17 @@ _ASSIGNED_SECRET = re.compile(
 )
 _PLACEHOLDER = re.compile(r"(?i)^(changeme|example|placeholder|xxx+|todo|your[-_].*|<.*>|\$\{.*\}|none|null)$")
 
+# Files exempt from the generic assigned-secret heuristic (still scanned for
+# known-format matches): this scanner's own source necessarily contains the
+# pattern literals ("api_key", "secret", ...) as regex/strings, not real
+# credentials, and the one test that plants a fake secret to prove the
+# scanner actually detects something (Requirement 20.7's own non-no-op
+# check) necessarily contains a matching literal by design.
+_SELF_EXEMPT_ASSIGNED_SECRET = {
+    "scripts/secret_scan.py",
+    "tests/test_stage8_security_hardening.py",
+}
+
 # Lines with these markers are test fixtures / documentation examples, not a
 # real leaked secret -- still scanned for known-format matches, but exempt
 # from the generic assigned-secret heuristic to avoid noise on, e.g., a
@@ -54,13 +65,21 @@ def _tracked_files() -> list[Path]:
     return [REPO_ROOT / line for line in out.stdout.splitlines() if line]
 
 
-def scan_text(text: str) -> list[tuple[int, str]]:
-    """Return (line_number, reason) for every suspected secret in `text`."""
+def scan_text(text: str, *, check_assigned_secret: bool = True) -> list[tuple[int, str]]:
+    """Return (line_number, reason) for every suspected secret in `text`.
+
+    `check_assigned_secret=False` is used for this scanner's own self-exempt
+    files (see `_SELF_EXEMPT_ASSIGNED_SECRET`) -- known-format checks
+    (private keys, AWS/GitHub/Slack tokens) still run unconditionally, since
+    those patterns don't collide with the scanner's own pattern literals or
+    a test's documented planted-secret string."""
     findings: list[tuple[int, str]] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         for pattern, reason in _KNOWN_FORMATS:
             if pattern.search(line):
                 findings.append((lineno, reason))
+        if not check_assigned_secret:
+            continue
         for match in _ASSIGNED_SECRET.finditer(line):
             value = match.group(1)
             if not _PLACEHOLDER.match(value):
@@ -77,9 +96,10 @@ def main() -> int:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        hits = scan_text(text)
+        rel = str(path.relative_to(REPO_ROOT))
+        hits = scan_text(text, check_assigned_secret=rel not in _SELF_EXEMPT_ASSIGNED_SECRET)
         if hits:
-            findings[str(path.relative_to(REPO_ROOT))] = hits
+            findings[rel] = hits
 
     if findings:
         print("secret-scan: possible plaintext secrets found:", file=sys.stderr)

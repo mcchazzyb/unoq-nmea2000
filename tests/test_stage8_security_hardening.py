@@ -143,3 +143,20 @@ def test_secret_scanner_ignores_placeholder_values():
     placeholder = 'password = "changeme"\n'
     findings = scan_text(placeholder)
     assert not findings
+
+
+def test_secret_scanner_does_not_flag_its_own_pattern_literals_or_planted_test_fixture(capsys):
+    """Feature: nmea2000-diagnostic-platform, Requirement 20.7: running the
+    secret scanner's own `main()` against the real repo must not flag the
+    scanner's own source (whose pattern definitions necessarily contain the
+    literal words "api_key"/"secret"/... as regex source, not real
+    credentials) or this test file's own planted-secret fixture above
+    (`test_secret_scanner_detects_a_planted_plaintext_secret`'s `sk_live_...`
+    string, which exists specifically to prove detection works). This failed
+    on a real `make lint` run before the self-exempt list was added: both
+    files tripped the generic assigned-secret heuristic on themselves."""
+    from scripts import secret_scan
+
+    rc = secret_scan.main()
+    captured = capsys.readouterr()
+    assert rc == 0, f"make lint's secret-scan step must not false-positive on its own source/tests:\n{captured.err}"
