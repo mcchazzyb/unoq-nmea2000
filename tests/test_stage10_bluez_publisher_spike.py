@@ -155,3 +155,16 @@ def test_characteristic_flags_stay_plain_when_pairing_not_required():
     characteristic = m._Characteristic(0, "/svc", live_engine_char, mock, require_pairing=False)
 
     assert characteristic.flags() == ["notify"]
+
+
+def test_agent_capability_routes_headless_confirmation_to_our_agent():
+    """Real root-level btmon trace on the UNO Q showed the exact failure:
+    NoInputNoOutput caused BlueZ to emit User Confirmation Negative Reply
+    without ever calling this agent's RequestConfirmation handler, so every
+    protected read failed Insufficient Encryption. DisplayYesNo is required
+    to route the confirmation to the agent; the handler auto-accepts it,
+    preserving the required no-keypad/no-board-button OBD-style UX. This is
+    encrypted/bonded but not human-verified MITM, documented in the module."""
+    import ble.bluez_publisher as m
+
+    assert m._AGENT_CAPABILITY == "DisplayYesNo"

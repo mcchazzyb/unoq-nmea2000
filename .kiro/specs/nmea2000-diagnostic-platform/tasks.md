@@ -715,7 +715,7 @@ properties (Properties 1-39 in design.md) it proves.
     differences (_Requirement 24.6_)
   - _Requirements: 24.1, 24.6_
 
-- [ ] 10.3 Real BLE: BlueZ GATT peripheral spike and implementation
+- [x] 10.3 Real BLE: BlueZ GATT peripheral spike and implementation
   - Build the "BlueZ GATT peripheral on the actual UNO Q" proof-of-concept spike to lock
     the concrete library choice (`bluezero` vs `python-dbus` vs alternative) behind the
     existing `BLEPublisher` abstraction from Stage 6
@@ -744,44 +744,45 @@ properties (Properties 1-39 in design.md) it proves.
   - Implement authenticated, bonded, encrypted pairing on the real BlueZ stack, defaulting
     to requiring pairing before vessel-data access, with open access as an explicit opt-in
     (_Requirement 28.1, 28.2, 28.3_)
-  - **Partial, with real genuine wins AND one open blocker, both confirmed live against
-    an actual iPhone on 2026-10-02:**
-    - **Working, verified live:** `Pairable=true` adapter config + a registered
-      `NoInputNoOutput` (Just Works) `org.bluez.Agent1` -- a real phone paired AND
-      bonded (`bluetoothctl info` showed `Paired: yes, Bonded: yes`, surviving a
-      process restart). `encrypt-read`/`encrypt-notify` GATT Flags are correctly
-      computed per-characteristic (verified via a diagnostic log dump of
-      `GetManagedObjects`'s own reply) with `schema_version` alone correctly exempt.
-    - **Fixed along the way:** (1) `MockBLEPublisher`'s own `require_pairing` must stay
-      `False` when wrapped by `BlueZPublisher` -- real BlueZ bonding is the ACTUAL
-      authentication boundary (enforced via Flags before `ReadValue` is ever called);
-      the mock's separate in-memory `paired_client_ids` ledger has no way to learn about
-      a real BlueZ bond and was wrongly re-rejecting an already-bonded phone. (2) The
-      `GetManagedObjects` reply was missing the required `Characteristics` array on the
-      `GattService1` properties and `Descriptors` array on each `GattCharacteristic1`
-      (found by diffing against BlueZ's own `test/example-gatt-server`); without them
-      `bluetoothd` logged `src/gatt-database.c:client_ready_cb() No object received`
-      and silently discarded the whole application despite `RegisterApplication`
-      reporting success.
-    - **STILL BLOCKED after all of the above:** even with the `Characteristics`/
-      `Descriptors` fix applied and `bluetoothd`'s log showing NO error at all on a
-      fresh `RegisterApplication`, `GetManagedObjects` queried fresh against the live
-      `org.bluez` object tree shows **zero** `org.bluez.GattService1`/
-      `GattCharacteristic1` objects anywhere outside a `/dev_.../` path (i.e. nothing
-      server-side is actually registered) -- `ReadValue` is never invoked no matter
-      what characteristic the phone's scanner app reads, confirmed by this module's own
-      diagnostic logging staying silent across multiple real attempts. Root cause NOT
-      YET FOUND: `RegisterApplication`'s async callback reports success with no
-      `bluetoothd`-side error, yet the GATT database never actually populates.
-    - **Next steps for whoever picks this up:** (a) try the alternative library this
-      spike's own design note left as the fallback -- `python-dbus`'s decorator-based
-      `dbus.service.Object` (as BlueZ's own working example uses) may interact with
-      BlueZ's internal validator differently than GDBus's lower-level
-      `register_object()`/introspection-XML approach; (b) get a BlueZ debug build or
-      `btmon` capture of the actual D-Bus traffic during `RegisterApplication` to see
-      exactly what BlueZ receives vs. what we think we're sending; (c) check for a BlueZ
-      version-specific quirk (this board runs BlueZ 5.82) in how it walks the
-      `GetManagedObjects` reply's path hierarchy.
+  - **Done 2026-10-02, verified live end-to-end against a real iPhone with a root
+    `btmon` capture of the actual ATT/SMP traffic:**
+    - `Pairable=true` adapter config + a registered `org.bluez.Agent1` + `encrypt-read`/
+      `encrypt-notify` GATT Flags per protected characteristic (`schema_version` alone
+      stays plain `read`, per Requirement 13.1).
+    - **Real root cause of the "no pairing prompt, no data" symptom, found by reading
+      BlueZ's own Agent API docs (`org.bluez.Agent.rst`) instead of guessing further
+      from traces:** the agent's capability was `NoInputNoOutput` (Just Works). On this
+      controller/iPhone pairing path, BlueZ accepted the connection at the ATT layer but
+      sent `User Confirmation Negative Reply` and failed SMP pairing (`Pairing Failed:
+      Numeric comparison failed`) WITHOUT ever invoking our `RequestConfirmation` D-Bus
+      method -- confirmed by a root `btmon` capture showing the MGMT confirmation
+      request and negative reply with no corresponding agent call in our own log.
+      Switching the agent capability to `DisplayYesNo` (while still auto-accepting in
+      code, with no screen/keypad/button added to the hardware) made BlueZ route the
+      confirmation to our handler, which accepts it automatically -- preserving the
+      required no-physical-interaction UX (same posture as an OBD Bluetooth adapter)
+      while actually completing the SMP exchange.
+    - **Verified via the raw ATT trace, not just a success log line:** `A2D2` returned
+      25 bytes decoding to `{"name": "unoq-nmea2000"}`; `A2D3` returned 102 bytes
+      decoding to `{"can_connected": true, "fps": 0.0, "dropped_frames": 0,
+      "error_count": 0, "discovered_node_count": 0}` -- real device_info/
+      connection_health JSON reaching a real phone over an encrypted BLE link.
+    - **Earlier real bugs found and fixed along the way (also real, not reverted):**
+      (1) `MockBLEPublisher`'s own `require_pairing` must stay `False` when wrapped by
+      `BlueZPublisher` -- BlueZ bonding is the actual authentication boundary, enforced
+      via Flags before `ReadValue` is ever called; the mock's separate in-memory
+      `paired_client_ids` ledger has no way to learn about a real BlueZ bond. (2) The
+      `GetManagedObjects` reply was missing the required `Characteristics` array on
+      `GattService1` and `Descriptors` array on each `GattCharacteristic1` (found by
+      diffing against BlueZ's own `test/example-gatt-server`); without them
+      `bluetoothd` logged `client_ready_cb() No object received` and silently discarded
+      the whole application despite `RegisterApplication` reporting success.
+    - **Honest limitation, documented in the module's own docstring:** `DisplayYesNo`
+      with automatic acceptance is encrypted/bonded but NOT human-verified
+      man-in-the-middle protection (no screen exists to actually show/compare the
+      passkey). This matches the hardware's real capability and the "connect like an
+      OBD adapter" requirement; it is not upgradeable without adding a trusted display
+      or button to the board.
   - _Requirements: 13.1-13.10, 28.1-28.3_
 
 - [ ] 10.4 Final documentation pass (hardware scope)

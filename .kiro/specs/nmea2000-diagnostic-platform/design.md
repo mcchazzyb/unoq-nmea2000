@@ -53,6 +53,21 @@ itself, which wraps `MockBLEPublisher` for all state/encoding/pairing/staleness 
 is unaware of this topology, swapping it was still cheap, exactly as this section
 originally predicted.
 
+**BLE pairing resolved 2026-10-02, verified against a real iPhone with a root `btmon`
+capture:** the agent's capability must be `DisplayYesNo`, not `NoInputNoOutput`. On
+this controller/iPhone pairing path, `NoInputNoOutput` made BlueZ fail SMP pairing
+(`User Confirmation Negative Reply`, `Pairing Failed: Numeric comparison failed`)
+WITHOUT ever calling our `RequestConfirmation` D-Bus method -- found by reading
+BlueZ's own `org.bluez.Agent.rst` API docs rather than guessing further from traces.
+`DisplayYesNo` routes the confirmation to our handler, which accepts it automatically
+in code -- the UNO Q still has no physical screen, keypad, or button, matching the
+required "connect like an OBD Bluetooth adapter" UX. This is an honest, documented
+tradeoff: the link is encrypted and bonded, but NOT human-verified against a
+man-in-the-middle (no display exists to show/compare the passkey). Verified via the
+raw ATT payload bytes, not just a success log line: `device_info` and
+`connection_health` characteristics returned real JSON to the phone over the
+encrypted link.
+
 ## Architecture
 
 ### Layered Architecture

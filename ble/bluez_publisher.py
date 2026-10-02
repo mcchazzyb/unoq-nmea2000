@@ -391,6 +391,20 @@ _ADVERTISEMENT_INTROSPECTION_XML = """
 _SERVICE_SHORT_UUID = "A2D0"
 _LOCAL_NAME = "unoq-nmea2000"
 
+# BlueZ's agent capability must be DisplayYesNo, not NoInputNoOutput, on
+# this UNO Q/iPhone pairing path. Found via a real root-level btmon trace:
+# with NoInputNoOutput the controller received a User Confirmation Request
+# (value 000000) then immediately issued User Confirmation Negative Reply
+# WITHOUT ever invoking our RequestConfirmation D-Bus handler, resulting in
+# "Pairing Failed: Numeric comparison failed" and every protected GATT read
+# failing "Insufficient Encryption". DisplayYesNo makes BlueZ route that
+# request to our handler; it auto-accepts it below. There is still NO physical
+# screen/keypad/button and no passkey entry required on the UNO Q -- this is
+# the desired OBD-style flow (phone consent + automatic board acceptance),
+# yielding a bonded/encrypted link. ponytail: it is not human-verified MITM;
+# upgrade only if the hardware gains a trusted display/button UI.
+_AGENT_CAPABILITY = "DisplayYesNo"
+
 
 @dataclass
 class BlueZPublisher:
@@ -485,12 +499,13 @@ class BlueZPublisher:
         complete even though the adapter is Pairable and the characteristic
         correctly demands encryption.
 
-        `NoInputNoOutput` capability is the right choice for a headless
-        diagnostic device with no screen/keyboard: it tells BlueZ to
-        negotiate Just Works pairing, which needs no PIN/passkey exchange
-        and (per BlueZ's own agent-api docs) rarely even calls back into
-        this agent's methods -- registering it is still required so BlueZ
-        has an agent object to authorize against."""
+        `DisplayYesNo` is intentional here despite the headless hardware: it
+        makes BlueZ dispatch the confirmation request to this agent, which
+        immediately accepts it programmatically. That preserves the intended
+        OBD-style UX: the phone may show its normal one-time pairing consent,
+        but there is no Arduino keypad, screen, passkey, or physical button.
+        It yields an encrypted/bonded link but is not human-verified MITM --
+        see `_AGENT_CAPABILITY`'s comment for the honest security boundary."""
         Gio, GLib = _gi()
         agent_path = "/org/unoq/nmea2000/agent0"
         agent_xml = """
@@ -535,15 +550,21 @@ class BlueZPublisher:
         def method_call(
             connection, sender, object_path, interface_name, method_name, parameters, invocation
         ) -> None:
-            # Just Works (NoInputNoOutput): accept every confirmation/
-            # authorization request with no user interaction. No PIN/
-            # passkey prompt is appropriate here -- this is a headless
-            # diagnostic device, not a device with a screen or keypad.
+            logger.info(
+                "bluez_publisher: pairing agent received %s parameters=%s",
+                method_name,
+                parameters.print_(True) if parameters is not None else "()",
+            )
+            # DisplayYesNo is used solely to make BlueZ dispatch the numeric
+            # confirmation request to this agent; accept it automatically.
+            # There is no physical UI/passkey on the UNO Q -- this is the
+            # intended OBD-style phone-consent + automatic-board flow.
             if method_name in ("RequestConfirmation", "AuthorizeService", "RequestAuthorization"):
                 invocation.return_value(None)
             elif method_name in ("Release", "Cancel", "DisplayPasskey", "DisplayPinCode"):
                 invocation.return_value(None)
             else:
+                logger.warning("bluez_publisher: unsupported pairing agent call %s", method_name)
                 invocation.return_error_literal(
                     Gio.dbus_error_quark(), Gio.DBusError.UNKNOWN_METHOD, "no such method"
                 )
@@ -556,7 +577,7 @@ class BlueZPublisher:
         )
         agent_mgr.call_sync(
             "RegisterAgent",
-            GLib.Variant("(os)", (agent_path, "NoInputNoOutput")),
+            GLib.Variant("(os)", (agent_path, _AGENT_CAPABILITY)),
             Gio.DBusCallFlags.NONE,
             -1,
             None,
@@ -564,7 +585,11 @@ class BlueZPublisher:
         agent_mgr.call_sync(
             "RequestDefaultAgent", GLib.Variant("(o)", (agent_path,)), Gio.DBusCallFlags.NONE, -1, None
         )
-        logger.info("bluez_publisher: pairing agent registered at %s (NoInputNoOutput/Just Works)", agent_path)
+        logger.info(
+            "bluez_publisher: pairing agent registered at %s (%s; automatic confirmation)",
+            agent_path,
+            _AGENT_CAPABILITY,
+        )
 
     def _set_adapter_pairable(self, adapter_path: str) -> None:
         """Real bug found via this spike's own live phone test: setting
