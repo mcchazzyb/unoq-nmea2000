@@ -434,7 +434,7 @@ properties (Properties 1-39 in design.md) it proves.
   - Run `make test lint run-api`
   - _Validates: Property 40 (partial -- see note above); Requirements 29.1-29.10_
 
-- [ ] 7.8 Mobile-first Web_UI layout
+- [x] 7.8 Mobile-first Web_UI layout
   - Rework `web/static/index.html`'s base (no-media-query) CSS to target a phone
     portrait viewport directly: single-column card stack, gauge/font sizing for
     arm's-length outdoor reading, with the existing desktop grid moved behind a
@@ -448,7 +448,7 @@ properties (Properties 1-39 in design.md) it proves.
     (_Requirement 30.3_)
   - _Requirements: 30.1-30.3_
 
-- [ ] 7.9 LAN bind for phone testing, with an explicit never-wildcard guard
+- [x] 7.9 LAN bind for phone testing, with an explicit never-wildcard guard
   - Extend `web/main.py`'s bind-host guard from its current `10.`/`192.168.` prefix
     check to the full RFC 1918 range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) via
     `ipaddress.ip_address(host).is_private and not is_loopback`, while explicitly
@@ -460,7 +460,7 @@ properties (Properties 1-39 in design.md) it proves.
     trusted-network-only warning (_Requirement 30.6_)
   - _Requirements: 30.4-30.6_
 
-- [ ] 7.10 Stage Gate — mobile-first layout and LAN bind guard
+- [x] 7.10 Stage Gate — mobile-first layout and LAN bind guard
   - Unit tests: bind guard accepts loopback, a 10.x address, a 172.16-31.x address, and
     a 192.168.x address (the common home/marina-router and Arduino-UNO-Q-advertised
     range); bind guard refuses `0.0.0.0`, `::`, and a public address, in every case
@@ -515,12 +515,15 @@ properties (Properties 1-39 in design.md) it proves.
   - [x] Run `make test lint run-sim run-api replay test-integration` on macOS — all green
     (157/157 tests, lint clean, run-sim/run-api/replay all boot and behave correctly,
     run-api confirmed loopback-only)
-  - [ ] Run the same sequence on a Windows or Linux host (CI matrix or local VM)
-    (_Requirement 23.1, 23.2_) — Requirement 23.1 permits either Windows or Linux;
-    WSL2 (a real Linux kernel) satisfies it. **Still open — needs the user to actually
-    run `make test lint run-sim run-api replay test-integration` on their WSL box (or
-    a CI matrix) and report the result**, since the requirement is "demonstrated",
-    not "possible in principle".
+  - [x] Run the same sequence on a Windows or Linux host (CI matrix or local VM)
+    (_Requirement 23.1, 23.2_) — **confirmed 2026-10-02 on WSL2 (Ubuntu/Debian
+    kernel)**: `make test` green (165+ tests passing, both coverage gates met —
+    one Hypothesis test needed `deadline=None` since real filesystem+SQLite I/O
+    legitimately varies across hosts, fixed and verified; one secret-scan false
+    positive on the scanner's own source/test fixture, fixed with an explicit
+    self-exempt list), `make lint` clean after the fix, `run-sim`/`run-api`/
+    `replay`/`test-integration` all confirmed working. Requirement 23.1's
+    "Windows or Linux" is satisfied by WSL2's real Linux kernel.
   - [x] Audit for any OS-specific dependency outside the documented BlueZ (Linux-only)
     boundary; confirm it's isolated behind an abstraction with a mock substitute
     (_Requirement 23.3, 23.4_) — audited: zero OS-specific imports exist anywhere in the
@@ -540,9 +543,13 @@ properties (Properties 1-39 in design.md) it proves.
   - **This gate is the pass/fail checkpoint for the entire host-testable MVP.** All of
     Requirements 1-23, 25, and 27-30 (host-testable scope) and Properties 1-31, 33-41
     must be demonstrated green here before Stage 9 (hardware) begins. The formula
-    decision is resolved; the second-OS run (on the user's WSL box) and the new
-    Stage 7.6-7.10 configurable-dashboard/mobile-first/LAN-bind work (Requirements 29-30,
-    Properties 40-41) both remain before this box can be checked `[x]`.
+    decision, the second-OS (WSL) run, and the Stage 7.6-7.10 configurable-dashboard/
+    mobile-first/LAN-bind build are all now done. **One item remains open:** Property
+    40 (the formal Hypothesis property test for "dashboard rendering == persisted
+    config") is covered only by discrete example tests (`test_stage7_dashboard_gate.py`,
+    15 tests) and a manual Node-DOM smoke test, not a tagged `@given`-based property
+    test — Stage 7.7 is marked `[~]` partial for this reason. This gate cannot be
+    checked `[x]` until that is resolved.
   - _Validates: full regression suite; Requirements 19.1-19.5, 23.1-23.4, 25.4, 29.1-29.10, 30.1-30.6_
 
 ---

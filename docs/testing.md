@@ -99,3 +99,43 @@ controller, no Bluetooth radio, and no vessel (Requirement 23.1, 23.2) —
 `simulator/generator.py` and `simulator/replay.py` both implement the same
 `ICanReceiver` Protocol real hardware would, so nothing in `service/` or
 above can tell the difference (Requirement 23, 24.6).
+
+## Testing the Web_UI from your phone
+
+By default `make run-api` binds to `127.0.0.1` only — your phone cannot
+reach it (Requirement 14.3). To load the dashboard from a phone on the
+same WiFi during development or on-boat use, bind to your Host_Platform's
+own LAN address instead (Requirement 30.4-30.6):
+
+```bash
+# macOS
+ipconfig getifaddr en0        # or en1, depending on your WiFi interface
+
+# Linux / WSL
+hostname -I                   # prints one or more addresses; pick the WiFi one
+
+# Windows (PowerShell)
+ipconfig                      # look for "IPv4 Address" under your WiFi adapter
+```
+
+Then run with that address:
+
+```bash
+UNOQ_BIND_HOST=192.168.1.42 make run-api
+```
+
+Open `http://192.168.1.42:8000/` from your phone, on the **same WiFi
+network** as the Host_Platform.
+
+**⚠️ The Web_API has no authentication** (Requirement 14 defines none —
+unlike BLE's Requirement 28 pairing model). Anything that can reach that
+address and port can read your vessel's live engine, tank, electrical, and
+navigation data. Only do this on a trusted private network you control —
+never on open marina WiFi, a shared/public network, or anywhere you
+wouldn't hand a stranger a live feed of your boat's instruments.
+
+The bind guard (`web/main.py`, `is_permitted_bind_host`) only accepts
+loopback or a named RFC 1918 private address (10.0.0.0/8, 172.16.0.0/12,
+192.168.0.0/16) that you supply explicitly — it never auto-detects your
+LAN IP and never accepts `0.0.0.0`/`::` (every interface), with no
+configuration path to override that refusal (steering 13).
