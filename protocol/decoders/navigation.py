@@ -6,6 +6,17 @@ Standard GNSS PGNs emitted by any onboard GPS receiver -- these decode the
 "speed/position fed from the onboard GPS" requirement without assuming any
 particular chartplotter or GPS brand (Requirement 6.2 / steering rule 04).
 
+Note on speed semantics: a GPS can only ever report Speed Over Ground (SOG,
+PGN 129026) -- it measures position change relative to the earth, not
+relative to the surrounding water, so it cannot produce a true Speed
+Through Water value without a dedicated water-referenced sensor (e.g. a
+paddlewheel, PGN 128259). A GPS unit's "speed" readout is SOG regardless of
+how its own display may label it. PGN 128259 is intentionally NOT decoded
+here: it requires a physical water-speed sensor this platform's vessels may
+not carry, and decoding it would need a design decision (a new
+NavigationState.stw field) only worth making once a vessel actually has
+that sensor.
+
 NavigationState carries no instance/source-address key per design.md (one
 NavigationState per VesselState); both PGNs decode into the SAME entity's
 different fields, so each decoder here only sets the fields its PGN carries
