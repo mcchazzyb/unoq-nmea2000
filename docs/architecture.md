@@ -306,15 +306,25 @@ proves one fixture yields identical values across BLE/REST/WS.
 
 ## Stage 8.5 sign-off status (2026-10-01)
 
-The full host-testable sign-off gate was run as far as a single macOS session
-can take it. Status:
+## Stage 8.5 sign-off status — CLOSED (2026-10-02)
 
-**Green, solo-confirmed:**
-- `make test lint run-sim run-api replay test-integration` — all pass on macOS
-  (157/157 tests, 93.11% overall coverage, 98% `protocol/` coverage, both
+The full host-testable sign-off gate is now fully green; both items that
+were previously blocked on the user have been resolved and confirmed.
+
+**Green, confirmed:**
+- `make test lint run-sim run-api replay test-integration` — all pass on
+  macOS (208 tests, 93%+ overall coverage, 98% `protocol/` coverage, both
   thresholds above their required floors; lint clean including the secret
   scanner; `run-api` confirmed loopback-only; `run-sim`/`replay` both produce
   correct output).
+- **Second-OS run — confirmed 2026-10-02 on WSL2 (Ubuntu/Debian kernel).**
+  `make test` green (165+ tests, both coverage gates met — one Hypothesis
+  test needed `deadline=None` since real filesystem+SQLite I/O legitimately
+  varies across hosts, fixed and verified; one secret-scan false positive on
+  the scanner's own source/test fixture, fixed with an explicit self-exempt
+  list), `make lint` clean after the fix, `run-sim`/`run-api`/`replay`/
+  `test-integration` all confirmed working. Requirement 23.1's "Windows or
+  Linux" is satisfied by WSL2's real Linux kernel.
 - Capture promotion (`scripts/promote_capture.py`) demonstrated end-to-end on a
   fresh 750 RPM idle capture generated via the simulator — promoted,
   validated, byte-identical. Not kept as a permanent fixture: `engine_idle.jsonl`
@@ -327,21 +337,24 @@ can take it. Status:
   nothing OS-specific in the codebase to isolate, which trivially satisfies the
   audit.
 - Coverage gates and per-area test audit: both already confirmed in Stage 8.3
-  (93.11% overall, 98% protocol/, all 7 required areas + both 19.5 cross-cutting
+  (93%+ overall, 98% protocol/, all 7 required areas + both 19.5 cross-cutting
   tests present).
+- **`quantity_remaining_litres` formula — resolved 2026-10-01.** User
+  confirmed the real-world convention: tank capacity is configured once in
+  litres (e.g. 90 L, 120 L) and `level_percent` reports the percentage of
+  that configured capacity. Corrected to
+  `(level_percent / 100) * capacity_litres` in requirements.md, design.md,
+  `protocol/decoders/tank.py`, and the Stage 3/6 pinning tests. Property 33
+  is now certified against the corrected, physically-sensible formula.
+- **Property 40 — resolved 2026-10-02.** Written as a Hypothesis property
+  test (`tests/test_stage7_property40_dashboard_gate.py`): a Python port of
+  the real JS dashboard-config persistence model, exercised across 100
+  generated examples each for arbitrary selection sets and arbitrary reorder
+  sequences, plus a static check pinning the ported model's shape against
+  the shipped JS.
+- **Stage 7.11-7.12 litres/US-gallons display toggle** — added after this
+  gate's original pass, scoped to display only (Requirement 8.8, 29.11,
+  29.12); the decode path is unaffected and proven so by a dedicated test.
 
-**Blocked — needs the user:**
-1. **Second-OS run.** Requirement 23.1/23.2 explicitly requires the same gate
-   sequence on a Windows or Linux host (CI matrix or local VM). This agent has
-   no such host reachable from this macOS session. Nothing here contradicts a
-   second-OS pass — the codebase has no OS-specific code outside the
-   not-yet-built BlueZ boundary — but the gate's own text requires it be
-   *demonstrated*, not inferred. Needs the user to run the sequence on a second
-   OS (or stand up a CI matrix) and report the result.
-2. **`quantity_remaining_litres` formula — RESOLVED 2026-10-01.** User
-   confirmed the real-world convention: tank capacity is configured once in
-   litres (e.g. 90 L, 120 L) and `level_percent` reports the percentage of
-   that configured capacity. Corrected to
-   `(level_percent / 100) * capacity_litres` in requirements.md, design.md,
-   `protocol/decoders/tank.py`, and the Stage 3/6 pinning tests. Property 33
-   is now certified against the corrected, physically-sensible formula.
+All of Requirements 1-23, 25, and 27-30 (host-testable scope) and
+Properties 1-41 are demonstrated green. Stage 9 (hardware) may begin.

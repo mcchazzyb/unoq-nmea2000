@@ -419,20 +419,23 @@ properties (Properties 1-39 in design.md) it proves.
     stale/quality-badge styling rather than disappearing (_Requirement 29.10_)
   - _Requirements: 29.1-29.10_
 
-- [~] 7.7 Stage Gate — configurable dashboard (partial — static tests done, formal property test open)
+- [x] 7.7 Stage Gate — configurable dashboard
   - DOM/unit tests: selecting/deselecting an instance adds/removes exactly its card;
     selecting a subset of attributes renders exactly that subset; reordering persists
     and survives a simulated reload (localStorage round-trip); an attribute in the range
     table renders a dial, one outside it renders a metric row; a card for an
     instance_key no longer in the live payload keeps its last values and stale styling
   - Property test: dashboard rendering equals exactly the persisted selection and survives
-    a reload with no further user action (Property 40) — not yet written as a Hypothesis
-    property test; the manual Node-DOM-stub smoke test (7 assertions, selection add/
-    remove, attribute toggling, gauge/metric split, reorder, localStorage round-trip)
-    and the static `tests/test_stage7_dashboard_gate.py` suite (15 tests) cover the
-    same ground example-by-example but Property 40 itself remains open
+    a reload with no further user action (Property 40) — written as a Hypothesis property
+    test (`tests/test_stage7_property40_dashboard_gate.py`): a direct Python port of the
+    real JS persistence model (`loadDashboardConfig`/`toggleInstanceSelected`/
+    `toggleAttributeSelected`/`moveCard`), exercised across 100 generated examples each
+    for arbitrary selection sets and arbitrary reorder sequences, plus a static check
+    pinning that the ported model's shape matches the shipped JS. The manual Node-DOM-stub
+    smoke test (7 assertions) and the static `tests/test_stage7_dashboard_gate.py` suite
+    (15 tests) remain as the example-based coverage this property test generalizes.
   - Run `make test lint run-api`
-  - _Validates: Property 40 (partial -- see note above); Requirements 29.1-29.10_
+  - _Validates: Property 40; Requirements 29.1-29.10_
 
 - [x] 7.8 Mobile-first Web_UI layout
   - Rework `web/static/index.html`'s base (no-media-query) CSS to target a phone
@@ -543,7 +546,7 @@ properties (Properties 1-39 in design.md) it proves.
     (_Requirement 21.3, 21.4_)
   - _Requirements: 21.3, 21.4_
 
-- [~] 8.5 Stage Gate — full host-testable sign-off (BLOCKED — see docs/architecture.md "Stage 8.5 sign-off status")
+- [x] 8.5 Stage Gate — full host-testable sign-off
   - [x] Promote one real/simulated capture through `scripts/promote_capture.py` and confirm it
     runs as a regression test (_Requirement 25.4_) — demonstrated with a fresh 750 RPM
     idle capture; not kept as a fixture since `engine_idle.jsonl` already covers the
@@ -565,7 +568,7 @@ properties (Properties 1-39 in design.md) it proves.
     (_Requirement 23.3, 23.4_) — audited: zero OS-specific imports exist anywhere in the
     current codebase (BlueZ itself isn't even wired in yet — that's Stage 10); nothing to
     isolate because nothing OS-specific has been introduced
-  - [x] Confirm coverage thresholds pass and every per-area test exists — 93.11% overall
+  - [x] Confirm coverage thresholds pass and every per-area test exists — 93.16% overall
     (≥80% required), 98% protocol/ (≥90% required), all 7 required test areas + both
     19.5 cross-cutting tests present (confirmed in Stage 8.3)
   - [x] **Spec decision resolved 2026-10-01:** `quantity_remaining_litres =
@@ -577,16 +580,13 @@ properties (Properties 1-39 in design.md) it proves.
     and the Stage 3/6 pinning tests together. Property 33 now certified against the
     corrected formula.
   - **This gate is the pass/fail checkpoint for the entire host-testable MVP.** All of
-    Requirements 1-23, 25, and 27-30 (host-testable scope) and Properties 1-31, 33-41
-    must be demonstrated green here before Stage 9 (hardware) begins. The formula
-    decision, the second-OS (WSL) run, and the Stage 7.6-7.10 configurable-dashboard/
-    mobile-first/LAN-bind build are all now done. **One item remains open:** Property
-    40 (the formal Hypothesis property test for "dashboard rendering == persisted
-    config") is covered only by discrete example tests (`test_stage7_dashboard_gate.py`,
-    15 tests) and a manual Node-DOM smoke test, not a tagged `@given`-based property
-    test — Stage 7.7 is marked `[~]` partial for this reason. This gate cannot be
-    checked `[x]` until that is resolved.
-  - _Validates: full regression suite; Requirements 19.1-19.5, 23.1-23.4, 25.4, 29.1-29.10, 30.1-30.6_
+    Requirements 1-23, 25, and 27-30 (host-testable scope) and Properties 1-41
+    are now demonstrated green: the formula decision, the second-OS (WSL) run, the
+    Stage 7.6-7.10 configurable-dashboard/mobile-first/LAN-bind build, the Stage
+    7.11-7.12 litres/US-gallons display toggle, and Property 40's formal Hypothesis
+    test (Stage 7.7) are all complete. Full regression at closure: 208 tests pass,
+    93%+ coverage, lint clean.
+  - _Validates: full regression suite; Requirements 19.1-19.5, 23.1-23.4, 25.4, 29.1-29.12, 30.1-30.6_
 
 ---
 
