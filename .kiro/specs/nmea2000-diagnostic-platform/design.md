@@ -526,6 +526,18 @@ Cross-cutting rules:
 - **Safe path resolution:** log/replay file paths resolve within the configured capture directory; any resolved path outside it is rejected without access, error indicating the path is not permitted (Requirements 14.7, 14.8). Implemented with `Path.resolve()` + `is_relative_to(capture_dir)`.
 - **No outbound internet:** capture, decode, persistence, and serving issue no outbound internet requests (Requirement 14.9).
 
+### Live_Ingestion_Runtime (Requirement 14.10, 14.11)
+
+A previously-missing seam, found while wiring Stage 9's real hardware receiver into the host entrypoint rather than designed up front: `web/main.py` built the FastAPI app and served `Live_State_Cache`, but nothing in the host codebase ever ran a continuous `receiver.frames() -> IngestionService.ingest_batch()` loop against it in the same process — `make run-sim` (prints to stdout) and `make run-api` (serves an empty cache) were two disconnected processes. `/api/v1/live` and the WebSocket feed were only ever genuinely "live" under test harnesses that wired `IngestionService` by hand.
+
+`Live_Ingestion_Runtime` closes this gap as a thin composition module (`web/runtime.py`):
+
+- Owns one `IngestionService`, constructed exactly as the Stage 4-7 tests already do (`RawCaptureLog`, `SessionStore`, `DecoderRegistry`, `live_cache=<the same LiveStateCache the Web_API reads>`, `discovery=<the same DiscoveryMode the Web_API reads>`).
+- Runs `for batch in <chunked receiver.frames()>: service.ingest_batch(batch)` on a background thread (daemon, so process exit is clean), started before `uvicorn.run()` blocks the main thread (Requirement 14.11: does not block request handling).
+- The `ICanReceiver` it drains is selected by **configuration, never by code change** (Requirement 14.10, consistent with Requirement 17.9's existing swap guarantee): `UNOQ_RECEIVER=simulator` (default — `simulator.generator`'s existing multi-node scenario, matching today's host-testable behavior with zero behavior change for existing `make run-api` users) or `UNOQ_RECEIVER=hardware` (the Stage 9 `ArduinoBridgeCanReceiver`, used only on the UNO Q itself).
+- Leaves `web/main.py`'s existing bind-host guard (Requirement 14.3, Property 41) completely untouched — this module only feeds the cache; it has no bind/socket responsibility of its own.
+- A receiver error (hardware disconnect, simulator exhaustion) is caught at the loop level and does not crash the Web_API process — consistent with steering 11's fail-safe rule applied to this new seam; the cache is marked stale via the existing `IngestionService` free-bytes/halt path rather than a new error path.
+
 ### Web_UI Design (Requirement 15)
 
 Single self-contained HTML + vanilla JS page served by the Web_API, no build step (Requirement 15.1), no outbound requests after initial load (Requirement 15.6).

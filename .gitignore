@@ -22,6 +22,10 @@ htmlcov/
 !fixtures/**/*.jsonl
 *.sqlite
 *.sqlite3
+session.db
+session.db-shm
+session.db-wal
+/captures/
 
 # OS
 .DS_Store

@@ -511,6 +511,44 @@ properties (Properties 1-39 in design.md) it proves.
   - Run `make test lint run-api`
   - _Validates: Requirements 8.8, 29.11, 29.12_
 
+- [x] 7.13 Live_Ingestion_Runtime: wire a continuous receiver loop into web.main
+  - Add `web/runtime.py`: owns one `IngestionService` (same construction pattern as the
+    Stage 4-7 tests), runs `receiver.frames()` through `ingest_batch()` on a background
+    daemon thread feeding the SAME `LiveStateCache`/`DiscoveryMode` instances the Web_API
+    reads, started before `uvicorn.run()` blocks (_Requirement 14.10, 14.11_)
+  - `web/main.py`: select the `ICanReceiver` by configuration only (`UNOQ_RECEIVER=simulator`
+    default — `simulator.generator`'s existing scenario, zero behavior change for existing
+    `make run-api` callers; `UNOQ_RECEIVER=hardware` — Stage 9's `ArduinoBridgeCanReceiver`),
+    never by code change, consistent with the existing Requirement 17.9 swap guarantee
+  - A receiver error (disconnect, exhaustion) is caught at the loop level and does not crash
+    the Web_API process (steering 11 fail-safe, applied to this new seam)
+  - Leave the existing bind-host guard (`is_permitted_bind_host`, Requirement 14.3,
+    Property 41) completely untouched — this module has no bind/socket responsibility
+  - Tests: `make run-api` with the default simulator receiver produces a genuinely live
+    `/api/v1/live` and WebSocket feed (values change over successive polls, not a frozen
+    empty cache); a receiver that raises mid-loop leaves the Web_API process running and
+    the next successful batch resumes updating the cache; `UNOQ_RECEIVER` selection is
+    covered by a unit test asserting the correct `ICanReceiver` implementation is
+    constructed for each value, and an unrecognized value fails fast with a named error
+    rather than silently defaulting
+  - Run `make test lint run-api`
+  - _Requirements: 14.10, 14.11; Validates: 17.9_
+  - **Done 2026-10-02:** `web/runtime.py` added (`SimulatorReceiver`, `build_receiver`,
+    `LiveIngestionRuntime`); wired into `web/main.py` via `UNOQ_RECEIVER`. Found and fixed
+    TWO real bugs only an actual running-server check surfaced (not just unit tests):
+    (1) `SessionStore`'s SQLite connection must be constructed on the SAME thread that uses
+    it — constructing it in `__init__` on the caller's thread raised
+    `sqlite3.ProgrammingError` on the first batch from the background thread, silently
+    retried forever by the fail-safe handler; fixed by constructing `IngestionService` and
+    its `SessionStore`/`RawCaptureLog` entirely inside the background thread; (2)
+    `GET /api/v1/health`'s `can_connected` had NEVER been wired to anything in the host
+    codebase before this task — always read False/None. `LiveIngestionRuntime` now polls
+    `receiver.health()` into `cache.vessel.health.can_health` every batch. Verified against
+    an actually-running `python -m web.main` process with `curl`, not just pytest: `/api/v1/
+    health` reports `can_connected: true`, `/api/v1/live`'s `updated_at` genuinely advances
+    across polls. 6 new tests (`tests/test_stage7_live_ingestion_runtime_gate.py`) + 27-test
+    Stage 7 regression pass, lint clean.
+
 ## Stage 8 — Host-stack hardening and sign-off
 
 - [x] 8.1 Capture promotion to golden fixtures

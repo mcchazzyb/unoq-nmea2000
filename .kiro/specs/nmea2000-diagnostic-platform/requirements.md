@@ -244,6 +244,8 @@ This document defines requirements only (the "what"). Architecture and implement
 7. WHEN a log or replay request references a file path, THE Web_API SHALL resolve the path within the configured capture directory.
 8. IF a resolved log or replay file path lies outside the configured capture directory, THEN THE Web_API SHALL reject the request without accessing the file and SHALL return an error response indicating the path is not permitted.
 9. THE Platform SHALL complete capture, decode, persistence, and serving operations without issuing any outbound internet request.
+10. THE Platform SHALL provide a Live_Ingestion_Runtime that continuously pulls frames from a configured ICanReceiver (Simulator or real hardware, selected by configuration, never by code change) through one running Ingestion_Service, keeping the Live_State_Cache the Web_API and Web_UI read updated in real time while `make run-api` / `web.main` is serving, so that GET /api/v1/live and the WebSocket feed reflect genuinely live decoded data rather than only data from a separately-run replay or test.
+11. THE Live_Ingestion_Runtime SHALL run the ICanReceiver consumption loop without blocking the Web_API's own request handling, and SHALL leave the Web_API's existing bind-host and local-only guarantees (Requirement 14.3) unchanged.
 
 ### Requirement 15: Web UI
 

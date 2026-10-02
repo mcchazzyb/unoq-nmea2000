@@ -12,6 +12,7 @@ from pathlib import Path
 from service.cache import LiveStateCache
 from service.discovery import DiscoveryMode
 from web.api import create_app
+from web.runtime import LiveIngestionRuntime, build_receiver
 
 #: Never a publicly routable interface by default (Requirement 14.3).
 DEFAULT_BIND_HOST = "127.0.0.1"
@@ -48,6 +49,15 @@ def main() -> int:
     cache = LiveStateCache()
     discovery = DiscoveryMode()
     app = create_app(cache, discovery, capture_dir)
+
+    # Requirement 14.10, 14.11: a continuous receiver loop feeds the SAME
+    # cache/discovery the Web_API reads, selected by configuration only
+    # (never a code change) -- 'simulator' (default, matches existing
+    # host-testable behavior) or 'hardware' (Stage 9's real UNO Q receiver).
+    receiver_kind = os.environ.get("UNOQ_RECEIVER", "simulator")
+    receiver = build_receiver(receiver_kind)
+    runtime = LiveIngestionRuntime(cache, discovery, capture_dir, receiver)
+    runtime.start()
 
     host = os.environ.get("UNOQ_BIND_HOST", DEFAULT_BIND_HOST)
     if not is_permitted_bind_host(host):
