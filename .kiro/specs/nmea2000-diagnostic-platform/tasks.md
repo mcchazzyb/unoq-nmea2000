@@ -391,6 +391,45 @@ properties (Properties 1-39 in design.md) it proves.
   - Run `make test lint run-api test-integration`
   - _Validates: Properties 16 (full), 20, 21, 22 (full), 24 (full), 25, 26, 27, 36_
 
+- [ ] 7.6 User-configurable multi-instance dashboard (selectable sensors + gauges)
+  - Add a selection panel to `web/static/index.html` listing every entity instance
+    currently present in `/api/v1/live` (each engine/tank keyed by `instance:source`,
+    plus the electrical/navigation singletons), with a checkbox per instance and a
+    per-attribute checklist once an instance is selected (_Requirement 29.1, 29.3_)
+  - Implement the client-only dashboard configuration model (`{schema_version, cards:
+    [{entity_type, instance_key, attributes, order}]}`), persisted to `localStorage`
+    on every change and read once on load — no new API endpoint, no server-side
+    storage (_Requirement 29.2, 29.6, 29.7_)
+  - Implement card rendering as a second view over the existing WebSocket/REST payload
+    (reusing `renderLive`'s data, not a second poll loop), one card per selected
+    instance showing exactly its selected attributes (_Requirement 29.2, 29.3, 29.8_)
+  - Implement the gauge-vs-metric split: attributes in the static range table
+    (`level_percent`, `rpm`, `coolant_temp`, `oil_pressure`, `fuel_rate`,
+    `battery_voltage`, `charging_voltage`, `depth`) render as an inline-SVG circular
+    dial scaled to their range (configurable max for `rpm`/`fuel_rate`/`depth`);
+    attributes outside the table keep the existing numeric/textual metric row
+    (_Requirement 29.4, 29.5_)
+  - Implement drag-to-reorder (or equivalent up/down control for touch) on dashboard
+    cards, persisting the new order immediately (_Requirement 29.6, 29.7_)
+  - Implement the dashboard-area empty state (distinct from the discovery view's empty
+    state) shown while zero instances are selected, pointing the user at the selection
+    panel (_Requirement 29.9_)
+  - Implement stale-instance handling: a card whose `instance_key` is no longer present
+    in the latest payload keeps rendering its last-known values with the existing
+    stale/quality-badge styling rather than disappearing (_Requirement 29.10_)
+  - _Requirements: 29.1-29.10_
+
+- [ ] 7.7 Stage Gate — configurable dashboard
+  - DOM/unit tests: selecting/deselecting an instance adds/removes exactly its card;
+    selecting a subset of attributes renders exactly that subset; reordering persists
+    and survives a simulated reload (localStorage round-trip); an attribute in the range
+    table renders a dial, one outside it renders a metric row; a card for an
+    instance_key no longer in the live payload keeps its last values and stale styling
+  - Property test: dashboard rendering equals exactly the persisted selection and survives
+    a reload with no further user action (Property 40)
+  - Run `make test lint run-api`
+  - _Validates: Property 40; Requirements 29.1-29.10_
+
 ## Stage 8 — Host-stack hardening and sign-off
 
 - [x] 8.1 Capture promotion to golden fixtures
@@ -457,11 +496,12 @@ properties (Properties 1-39 in design.md) it proves.
     and the Stage 3/6 pinning tests together. Property 33 now certified against the
     corrected formula.
   - **This gate is the pass/fail checkpoint for the entire host-testable MVP.** All of
-    Requirements 1-23, 25, and 27-28 (host-testable scope) and Properties 1-31, 33-39
+    Requirements 1-23, 25, and 27-29 (host-testable scope) and Properties 1-31, 33-40
     must be demonstrated green here before Stage 9 (hardware) begins. The formula
-    decision is resolved; only the second-OS run (on the user's WSL box) remains.
-    decision) before this box can be checked `[x]`.
-  - _Validates: full regression suite; Requirements 19.1-19.5, 23.1-23.4, 25.4_
+    decision is resolved; the second-OS run (on the user's WSL box) and the new
+    Stage 7.6/7.7 configurable-dashboard work (Requirement 29, Property 40) both
+    remain before this box can be checked `[x]`.
+  - _Validates: full regression suite; Requirements 19.1-19.5, 23.1-23.4, 25.4, 29.1-29.10_
 
 ---
 

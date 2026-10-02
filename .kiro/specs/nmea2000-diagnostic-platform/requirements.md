@@ -427,6 +427,23 @@ This document defines requirements only (the "what"). Architecture and implement
 4. THE BLE_Service SHALL include an encoding or schema version in the payload or a companion characteristic so that clients can detect version changes.
 5. THE encoding SHALL carry each value's provenance summary including Value_Origin and staleness.
 
+### Requirement 29: User-Configurable Multi-Instance Dashboard
+
+**User Story:** As a boat owner, I want to pick which discovered devices and sensors appear on my dashboard, see each one's attributes as readable metrics and gauges, and arrange them, so that my monitoring view matches my own vessel's instrumentation instead of a fixed generic layout.
+
+#### Acceptance Criteria
+
+1. THE Web_UI SHALL present every discovered sensor-bearing entity instance (each EngineState keyed by engine_instance/Source_Address, each TankState keyed by tank_instance/Source_Address, ElectricalState, NavigationState) as an individually selectable item, distinguishing instances of the same entity type (for example two engines) from each other.
+2. THE Web_UI SHALL allow the user to select a subset of discovered entity instances, and SHALL render on the dashboard only the entity instances currently selected.
+3. FOR an entity instance with more than one decoded attribute (for example EngineState exposing rpm, coolant_temp, oil_pressure, alternator_voltage, fuel_rate, engine_hours, trim), THE Web_UI SHALL allow the user to select which of that instance's attributes are shown on the dashboard.
+4. WHEN a selected attribute has a defined natural display range (for example level_percent 0-100, rpm 0 to a configurable maximum), THE Web_UI SHALL render that attribute as a circular dial gauge showing the current value against its range, in addition to or instead of its numeric readout.
+5. WHEN a selected attribute has no defined natural display range (for example position, status flags), THE Web_UI SHALL render that attribute as a numeric or textual metric rather than a dial.
+6. THE Web_UI SHALL allow the user to reorder the selected entity-instance cards on the dashboard.
+7. THE Web_UI SHALL persist the user's selected entity instances, selected attributes per instance, and card order locally in the browser (for example via localStorage) without transmitting the configuration off the device, so the arrangement survives a page reload (_steering 12: local-only, no outbound_).
+8. THE Web_UI SHALL update each rendered gauge and metric in place, consuming the same Live_State_Cache data and the same staleness/quality Provenance markers as every other dashboard view (_Requirement 6.6, 20.6_), so a selected/arranged dashboard is never a second, inconsistent data path.
+9. WHILE no entity instances are selected, THE Web_UI SHALL display an empty-state indicator in the dashboard area directing the user to the selection view, distinct from the discovery view's own empty-state indicator (_Requirement 15.9_).
+10. WHEN a previously selected entity instance stops being discovered (for example its NodeKey goes offline or its instance key disappears from the Live_State_Cache), THE Web_UI SHALL continue displaying its card using the last known values marked stale, consistent with the staleness handling in Requirement 20.6, rather than silently removing the user's selection.
+
 ### Requirement 28: BLE Access Security and Privacy
 
 **User Story:** As a boat owner, I want my vessel data protected from nearby readers, so that read-only access does not mean open access to GPS position and vessel status.

@@ -536,6 +536,51 @@ Single self-contained HTML + vanilla JS page served by the Web_API, no build ste
 - **Node drill-down:** on selecting a node, shows raw frames, decoded values, timestamps, message frequency, payload variation, and source Provenance (Requirement 15.8).
 - **Degraded/disconnected:** shows a disconnected/degraded indicator while CAN reports disconnected or no frame for >= 3 s (Requirement 15.5).
 
+### User-Configurable Multi-Instance Dashboard (Requirement 29)
+
+The fixed four-panel layout above shows only the *first* engine/tank instance it finds (`Object.keys(data.engines)[0]`) — adequate for a single-engine, single-tank boat, but it hides every other instance once the Live_State_Cache holds more than one of a kind. Requirement 29 replaces that implicit choice with an explicit one: the user picks which discovered entity instances appear, which of each instance's attributes are shown, in what order, and whether an attribute reads as a gauge or a plain metric. This is a **client-only** feature — the backend already serializes every instance (`web/api.py`'s `_entity_to_response_dict` loop over `vessel.engines.items()`/`vessel.tanks.items()`), so no API change is needed; the gap is entirely in what the existing static page chooses to render.
+
+**Selection model (client-side, no new API):**
+
+```js
+// Persisted to localStorage under one key, never transmitted (Requirement 29.7, steering 12)
+{
+  "schema_version": 1,
+  "cards": [
+    {
+      "entity_type": "engine",          // "engine" | "tank" | "electrical" | "navigation"
+      "instance_key": "0:35",           // "<instance>:<source_address>" for engine/tank;
+                                         // fixed "electrical"/"navigation" singleton key otherwise
+      "attributes": ["rpm", "coolant_temp", "fuel_rate"],  // user-chosen subset
+      "order": 0                         // card position, user-reorderable (Requirement 29.6)
+    },
+    { "entity_type": "tank", "instance_key": "1:35", "attributes": ["level_percent"], "order": 1 }
+  ]
+}
+```
+
+**Selection view:** a new UI panel lists every instance currently present in `/api/v1/live` and `/api/v1/nodes` as a checkbox entry — `engine:0:35`, `engine:1:35`, `tank:0:35`, `tank:1:35`, the singleton `electrical`, the singleton `navigation` — distinguishing same-type instances by their `(instance, source_address)` key (Requirement 29.1). Selecting an instance expands a per-attribute checklist (Requirement 29.3) drawn from that entity type's known field list (the same `UNITS`-keyed field lists `renderEntityFields` already defines per panel today). Selected instances render as dashboard cards; deselecting an instance removes its card and its entry from the persisted config.
+
+**Gauge vs metric split (Requirements 29.4, 29.5):** an attribute renders as a circular dial when it has a defined natural range, else as the existing numeric/textual metric row. The range table is a small static map, since the Domain_Model does not carry a declared range per field:
+
+| Attribute | Range | Notes |
+| --- | --- | --- |
+| `level_percent` | 0-100 | tank fill |
+| `rpm` | 0-6000 (configurable max) | engine; max is a per-card user setting since engines vary |
+| `coolant_temp` | 0-120 °C | engine |
+| `oil_pressure` | 0-700000 Pa | engine |
+| `fuel_rate` | 0-configurable max L/h | engine |
+| `battery_voltage`, `charging_voltage` | 0-16 V | electrical (12/24V systems) |
+| `depth` | 0-configurable max m | navigation |
+
+Attributes outside this table (`position`, `status`, `dc_source`, `battery_state`, `cog`/`heading` which are better read as a compass-style dial but ship as numeric metrics in this iteration) fall back to the existing metric-row rendering. The dial is drawn as inline SVG (`<svg viewBox="0 0 100 100">` with a stroked arc, `stroke-dasharray` sized to `value/range`) — no charting library, consistent with the no-build-step constraint and avoiding the Chart.js canvas-sizing hazard entirely.
+
+**Data path (Requirement 29.8):** gauge/card rendering is a second *view* over the exact same WebSocket/REST payload the existing panels already consume — `renderLive(data)` dispatches to both the fixed legacy panels (kept for the single-instance case) and the new card renderer, so there is no second poll loop, no second staleness computation, and the quality/staleness badge logic already built for Requirement 20.6 is reused unchanged per card.
+
+**Persistence (Requirement 29.7):** `localStorage.setItem('dashboard_config_v1', JSON.stringify(config))` on every selection/reorder change; read once on page load. No server-side storage, no new endpoint — keeps the feature entirely within the existing local-only, no-outbound-request constraint (steering 12) and needs no Session_Store schema change.
+
+**Stale/vanished instance (Requirement 29.10):** a card's `instance_key` is looked up in the latest payload on each render tick; if absent, the card keeps rendering its last-received values with the existing `.is-stale`/quality-badge styling rather than disappearing — consistent with how the rest of the UI treats staleness, and avoiding a surprising "my gauge vanished" experience when a sensor drops out briefly.
+
 ### Simulator and Fixtures (Requirements 17, 25)
 
 `Simulator` implements `ICanReceiver`, so it drops into the boundary in place of hardware.
@@ -865,3 +910,9 @@ Requirement 19.
 *For any* node whose NMEA NAME reappears at a new source address, the NodeKey is unchanged and `current_source_address` is updated to the new address.
 
 **Validates: Requirements 10.2**
+
+### Property 40: Dashboard rendering is exactly the persisted selection, and persists across reload
+
+*For any* set of selected entity instances, selected attributes per instance, and card order saved to the dashboard configuration, the set of cards rendered equals exactly the selected instances, each card shows exactly its selected attributes, and reloading the page with no further user action reproduces the same cards, attributes, and order from the persisted configuration alone.
+
+**Validates: Requirements 29.1, 29.2, 29.3, 29.6, 29.7**
