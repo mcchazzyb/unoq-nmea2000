@@ -110,3 +110,48 @@ def test_can_health_from_health_json_maps_connected_flag():
     # Requirement 1.5/24.4: termination is never reported on by this mapping,
     # matching the MVP's drop-node-only guarantee.
     assert health_connected.termination_on is False
+
+
+def test_characteristic_flags_require_encryption_when_pairing_required():
+    """Real bug found via a live phone test (Stage 10.3 spike): a connected,
+    UNPAIRED phone successfully read a live-data characteristic with no
+    pairing prompt at all. Root cause: MockBLEPublisher.read_characteristic
+    DOES raise PairingRejectedError, but nothing caught it, and critically
+    nothing told BlueZ itself to refuse the read before our handler ran --
+    application-level client tracking was never going to be sufficient.
+    The real fix is link-layer: 'encrypt-read'/'encrypt-notify' GATT Flags
+    make BlueZ enforce pairing/encryption BEFORE ReadValue is ever called.
+    This test pins that every live-data characteristic gets the encrypted
+    flag when require_pairing=True, and that schema_version alone stays
+    plain 'read' (Requirement 13.1: a client must be able to identify the
+    service before pairing)."""
+    import ble.bluez_publisher as m
+    from ble.publisher import GATT_SCHEMA, MockBLEPublisher
+
+    mock = MockBLEPublisher(require_pairing=True)
+    chars_by_name = {
+        c.name: m._Characteristic(i, "/svc", c, mock, require_pairing=True)
+        for i, c in enumerate(GATT_SCHEMA)
+    }
+
+    assert "encrypt-read" in chars_by_name["connection_health"].flags()
+    assert "encrypt-notify" in chars_by_name["live_engine"].flags()
+    # schema_version is the one exempt characteristic -- plain read, no
+    # encryption required, so a client can identify the service pre-pairing.
+    assert chars_by_name["schema_version"].flags() == ["read"]
+
+
+def test_characteristic_flags_stay_plain_when_pairing_not_required():
+    """require_pairing=False (Requirement 28.2's explicit open-access
+    opt-in) must NOT add encrypt-read/encrypt-notify -- those flags force
+    BlueZ-level pairing regardless of the publisher's own require_pairing
+    setting, so an operator who explicitly chose open access must see it
+    actually take effect over the air, not just in application logic."""
+    import ble.bluez_publisher as m
+    from ble.publisher import GATT_SCHEMA, MockBLEPublisher
+
+    mock = MockBLEPublisher(require_pairing=False)
+    live_engine_char = next(c for c in GATT_SCHEMA if c.name == "live_engine")
+    characteristic = m._Characteristic(0, "/svc", live_engine_char, mock, require_pairing=False)
+
+    assert characteristic.flags() == ["notify"]

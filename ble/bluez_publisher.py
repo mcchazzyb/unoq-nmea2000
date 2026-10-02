@@ -41,7 +41,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from ble.publisher import GATT_SCHEMA, MockBLEPublisher, UnknownCharacteristicError
+from ble.publisher import GATT_SCHEMA, MockBLEPublisher, PairingRejectedError, UnknownCharacteristicError
 from protocol.domain import (
     UNSET,
     ElectricalState,
@@ -215,7 +215,33 @@ class _Characteristic:
     `ReadValue`/`StartNotify`/`StopNotify` on this object once registered;
     this class delegates every read to the wrapped MockBLEPublisher so the
     notify-vs-read split, pairing gate, and encoding logic is NOT
-    reimplemented here (Property 22/23 already proven against the mock)."""
+    reimplemented here (Property 22/23 already proven against the mock).
+
+    PAIRING ENFORCEMENT (Requirement 28.2, 28.3) -- real bug found and fixed
+    via this spike's own live phone test: `ReadValue`'s `client_id` has no
+    real per-connection identity plumbed through BlueZ's D-Bus API in any
+    simple form, and `MockBLEPublisher.read_characteristic`'s own
+    `PairingRejectedError` was being raised but silently swallowed (no
+    `except` for it in `_read_bytes`, so it propagated into an untyped
+    `method_call` and GDBus returned an empty/default reply -- a real phone
+    connected and "read" a characteristic with NO pairing prompt at all,
+    the opposite of Requirement 28.2's default-secure posture).
+
+    The correct fix is NOT application-level client tracking: BlueZ itself
+    enforces pairing/encryption at the link layer via the `encrypt-read` /
+    `encrypt-notify` GATT Flags (Core spec Table 3.5) -- setting them makes
+    BlueZ refuse the ATT request and drive the OS bonding prompt BEFORE
+    this process's ReadValue handler ever runs, which is both more correct
+    (enforced by the Bluetooth stack, not reimplementable-incorrectly in
+    Python) and simpler than any one of this class correlating D-Bus
+    `sender`/`device` identities to the mock's client_id set. `MockBLEPublisher`'s
+    own `_check_access`/`PairingRejectedError` stays as defense-in-depth
+    (now actually caught below) in case a client reaches ReadValue without
+    the expected encryption having been negotiated.
+    `schema_version` alone stays plain `read` (Requirement 13.1's own design:
+    a client must identify the service before pairing)."""
+
+    _UNAUTHENTICATED_CHARACTERISTICS = frozenset({"schema_version"})
 
     def __init__(
         self,
@@ -223,28 +249,26 @@ class _Characteristic:
         service_path: str,
         char,
         publisher: MockBLEPublisher,
+        require_pairing: bool,
     ) -> None:
         self.path = f"{service_path}/char{index:03d}"
         self._char = char
         self._publisher = publisher
+        self._require_pairing = require_pairing
         self._notifying = False
 
     def _read_bytes(self) -> bytes:
         name = self._char.name
-        try:
-            if name == "schema_version":
-                return bytes([self._publisher.read_schema_version()])
-            if name == "device_info":
-                return json.dumps(self._publisher.device_info).encode("utf-8")
-            if name == "connection_health":
-                return json.dumps(self._publisher.read_connection_health()).encode("utf-8")
-            if name == "diagnostics":
-                return json.dumps(self._publisher.read_diagnostics()).encode("utf-8")
-            value = self._publisher.read_characteristic(name)
-            return value if value is not None else b""
-        except UnknownCharacteristicError:
-            logger.exception("bluez_publisher: unknown characteristic %s requested", name)
-            return b""
+        if name == "schema_version":
+            return bytes([self._publisher.read_schema_version()])
+        if name == "device_info":
+            return json.dumps(self._publisher.device_info).encode("utf-8")
+        if name == "connection_health":
+            return json.dumps(self._publisher.read_connection_health()).encode("utf-8")
+        if name == "diagnostics":
+            return json.dumps(self._publisher.read_diagnostics()).encode("utf-8")
+        value = self._publisher.read_characteristic(name)
+        return value if value is not None else b""
 
     def method_call(
         self,
@@ -256,9 +280,33 @@ class _Characteristic:
         parameters,
         invocation,
     ) -> None:
-        _, GLib = _gi()
+        Gio, GLib = _gi()
         if method_name == "ReadValue":
-            data = self._read_bytes()
+            logger.info(
+                "bluez_publisher: ReadValue called on %s (require_pairing=%s)",
+                self._char.name,
+                self._require_pairing,
+            )
+            try:
+                data = self._read_bytes()
+            except UnknownCharacteristicError:
+                logger.exception("bluez_publisher: unknown characteristic %s requested", self._char.name)
+                invocation.return_error_literal(
+                    Gio.dbus_error_quark(), Gio.DBusError.FAILED, "unknown characteristic"
+                )
+                return
+            except PairingRejectedError:
+                # Defense-in-depth: the encrypt-read Flag below should make
+                # BlueZ enforce this before we ever get here, but if a
+                # client somehow reaches ReadValue unauthenticated, reject
+                # explicitly rather than returning data.
+                logger.warning(
+                    "bluez_publisher: ReadValue on %s rejected -- client not paired", self._char.name
+                )
+                invocation.return_error_literal(
+                    Gio.dbus_error_quark(), Gio.DBusError.ACCESS_DENIED, "pairing required"
+                )
+                return
             invocation.return_value(GLib.Variant("(ay)", (list(data),)))
         elif method_name == "StartNotify":
             self._notifying = True
@@ -267,10 +315,29 @@ class _Characteristic:
             self._notifying = False
             invocation.return_value(None)
         else:
-            Gio, _ = _gi()
             invocation.return_error_literal(
                 Gio.dbus_error_quark(), Gio.DBusError.UNKNOWN_METHOD, "no such method"
             )
+
+    def flags(self) -> list[str]:
+        """Shared Flags computation -- used by both this object's own
+        `get_property('Flags')` AND `_register_gatt_application`'s
+        `GetManagedObjects` reply, so the two can never drift apart (that
+        drift is exactly how a security-relevant Flags value could stay
+        correct in one place and stale in the other)."""
+        flags = list(
+            {
+                "read": ["read"],
+                "notify": ["notify"],
+                "read_notify": ["read", "notify"],
+            }[self._char.properties.value]
+        )
+        if self._require_pairing and self._char.name not in self._UNAUTHENTICATED_CHARACTERISTICS:
+            if "read" in flags:
+                flags = [f for f in flags if f != "read"] + ["encrypt-read"]
+            if "notify" in flags:
+                flags = [f for f in flags if f != "notify"] + ["encrypt-notify"]
+        return flags
 
     def get_property(self, connection, sender, object_path, interface_name, property_name):
         _, GLib = _gi()
@@ -279,12 +346,7 @@ class _Characteristic:
         if property_name == "Service":
             return GLib.Variant("o", self.path.rsplit("/", 1)[0])
         if property_name == "Flags":
-            flags = {
-                "read": ["read"],
-                "notify": ["notify"],
-                "read_notify": ["read", "notify"],
-            }[self._char.properties.value]
-            return GLib.Variant("as", flags)
+            return GLib.Variant("as", self.flags())
         return None
 
 
@@ -346,9 +408,26 @@ class BlueZPublisher:
     device_info: dict | None = None
 
     def __post_init__(self) -> None:
-        self._mock = MockBLEPublisher(
-            require_pairing=self.require_pairing, device_info=self.device_info or {}
-        )
+        # require_pairing=False on the WRAPPED mock, always -- deliberately
+        # NOT self.require_pairing. Real bug found via this spike's own
+        # live phone test: with the mock's own require_pairing=True, a
+        # phone that BlueZ had ALREADY bonded (Paired: yes, Bonded: yes,
+        # confirmed via bluetoothctl) still got every ReadValue rejected
+        # with PairingRejectedError, because the mock's _check_access
+        # checks its OWN in-memory paired_client_ids set, which nothing
+        # populates from a real BlueZ bonding event -- the two "paired"
+        # concepts were never the same thing. For BlueZPublisher, pairing
+        # enforcement is REAL and already done at the link layer by BlueZ
+        # before ReadValue is ever invoked (via the encrypt-read/
+        # encrypt-notify Flags set in _Characteristic.flags(), gated on
+        # self.require_pairing, NOT the mock's). By the time this process's
+        # ReadValue handler runs, BlueZ has already proven the connection is
+        # encrypted/bonded; re-checking an unrelated in-memory ledger is
+        # redundant at best and actively wrong at worst (exactly what broke
+        # here). MockBLEPublisher's own require_pairing stays meaningful
+        # for ITS OWN host-testable in-memory use (Stage 6), just not when
+        # wrapped by this real D-Bus-backed publisher.
+        self._mock = MockBLEPublisher(require_pairing=False, device_info=self.device_info or {})
         self._bus = None
         self._registrations: list[int] = []
         self._service_path = "/org/unoq/nmea2000/service0"
@@ -382,6 +461,9 @@ class BlueZPublisher:
         Gio, _GLib = _gi()
         self._bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
         adapter_path = self._find_adapter()
+        if self.require_pairing:
+            self._register_agent()
+            self._set_adapter_pairable(adapter_path)
         self._register_service_and_characteristics()
         self._register_gatt_application(adapter_path)
         self._register_advertisement(adapter_path)
@@ -390,6 +472,126 @@ class BlueZPublisher:
             "(async -- the main loop must be running for BlueZ's completion callback to fire)",
             adapter_path,
         )
+
+    def _register_agent(self) -> None:
+        """Second real bug found via this spike's own live phone test:
+        `Pairable=true` + `encrypt-read` Flags alone still weren't enough --
+        the phone's OS pairing prompt appeared, but our ReadValue was NEVER
+        invoked afterward and bluetoothctl kept reporting Paired=no, Bonded=no.
+        Root cause: NO Bluetooth pairing agent was registered on the system
+        bus at all (`busctl --system tree org.bluez | grep agent` found
+        nothing) -- without a registered agent, BlueZ has no object to route
+        the pairing negotiation through, so the SMP exchange cannot actually
+        complete even though the adapter is Pairable and the characteristic
+        correctly demands encryption.
+
+        `NoInputNoOutput` capability is the right choice for a headless
+        diagnostic device with no screen/keyboard: it tells BlueZ to
+        negotiate Just Works pairing, which needs no PIN/passkey exchange
+        and (per BlueZ's own agent-api docs) rarely even calls back into
+        this agent's methods -- registering it is still required so BlueZ
+        has an agent object to authorize against."""
+        Gio, GLib = _gi()
+        agent_path = "/org/unoq/nmea2000/agent0"
+        agent_xml = """
+        <node>
+          <interface name="org.bluez.Agent1">
+            <method name="Release"/>
+            <method name="RequestPinCode">
+              <arg name="device" type="o" direction="in"/>
+              <arg name="pincode" type="s" direction="out"/>
+            </method>
+            <method name="RequestPasskey">
+              <arg name="device" type="o" direction="in"/>
+              <arg name="passkey" type="u" direction="out"/>
+            </method>
+            <method name="DisplayPasskey">
+              <arg name="device" type="o" direction="in"/>
+              <arg name="passkey" type="u" direction="in"/>
+              <arg name="entered" type="q" direction="in"/>
+            </method>
+            <method name="DisplayPinCode">
+              <arg name="device" type="o" direction="in"/>
+              <arg name="pincode" type="s" direction="in"/>
+            </method>
+            <method name="RequestConfirmation">
+              <arg name="device" type="o" direction="in"/>
+              <arg name="passkey" type="u" direction="in"/>
+            </method>
+            <method name="RequestAuthorization">
+              <arg name="device" type="o" direction="in"/>
+            </method>
+            <method name="AuthorizeService">
+              <arg name="device" type="o" direction="in"/>
+              <arg name="uuid" type="s" direction="in"/>
+            </method>
+            <method name="Cancel"/>
+          </interface>
+        </node>
+        """
+        node_info = Gio.DBusNodeInfo.new_for_xml(agent_xml)
+        iface_info = node_info.interfaces[0]
+
+        def method_call(
+            connection, sender, object_path, interface_name, method_name, parameters, invocation
+        ) -> None:
+            # Just Works (NoInputNoOutput): accept every confirmation/
+            # authorization request with no user interaction. No PIN/
+            # passkey prompt is appropriate here -- this is a headless
+            # diagnostic device, not a device with a screen or keypad.
+            if method_name in ("RequestConfirmation", "AuthorizeService", "RequestAuthorization"):
+                invocation.return_value(None)
+            elif method_name in ("Release", "Cancel", "DisplayPasskey", "DisplayPinCode"):
+                invocation.return_value(None)
+            else:
+                invocation.return_error_literal(
+                    Gio.dbus_error_quark(), Gio.DBusError.UNKNOWN_METHOD, "no such method"
+                )
+
+        reg_id = self._bus.register_object(agent_path, iface_info, method_call, None, None)
+        self._registrations.append(reg_id)
+
+        agent_mgr = Gio.DBusProxy.new_sync(
+            self._bus, Gio.DBusProxyFlags.NONE, None, BLUEZ_SERVICE_NAME, "/org/bluez", "org.bluez.AgentManager1", None
+        )
+        agent_mgr.call_sync(
+            "RegisterAgent",
+            GLib.Variant("(os)", (agent_path, "NoInputNoOutput")),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+        )
+        agent_mgr.call_sync(
+            "RequestDefaultAgent", GLib.Variant("(o)", (agent_path,)), Gio.DBusCallFlags.NONE, -1, None
+        )
+        logger.info("bluez_publisher: pairing agent registered at %s (NoInputNoOutput/Just Works)", agent_path)
+
+    def _set_adapter_pairable(self, adapter_path: str) -> None:
+        """Real bug found via this spike's own live phone test: setting
+        `encrypt-read`/`encrypt-notify` on a characteristic's Flags is NOT
+        enough on its own -- BlueZ reported the correct Flags via
+        GetManagedObjects (verified with a diagnostic log) but a connected,
+        unpaired phone still read a protected characteristic with no
+        bonding prompt. Root cause: the adapter's own `Pairable` property
+        was `no` (BlueZ's startup default), so BlueZ had no way to DRIVE a
+        pairing procedure even though it correctly knew the characteristic
+        required encryption -- `Pairable` gates whether the adapter will
+        initiate/accept SMP pairing at all, independent of any individual
+        GATT characteristic's Flags. Setting it here, scoped to only the
+        require_pairing=True case, so an operator's explicit open-access
+        opt-in (Requirement 28.2) does not get silently paired anyway."""
+        Gio, GLib = _gi()
+        props = Gio.DBusProxy.new_sync(
+            self._bus, Gio.DBusProxyFlags.NONE, None, BLUEZ_SERVICE_NAME, adapter_path, DBUS_PROP_IFACE, None
+        )
+        props.call_sync(
+            "Set",
+            GLib.Variant("(ssv)", ("org.bluez.Adapter1", "Pairable", GLib.Variant("b", True))),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+        )
+        logger.info("bluez_publisher: adapter %s set Pairable=true", adapter_path)
 
     def _find_adapter(self) -> str:
         Gio, _GLib = _gi()
@@ -427,7 +629,9 @@ class BlueZPublisher:
         char_node_info = Gio.DBusNodeInfo.new_for_xml(_CHARACTERISTIC_INTROSPECTION_XML)
         char_iface_info = char_node_info.interfaces[0]
         for index, char in enumerate(GATT_SCHEMA):
-            characteristic = _Characteristic(index, self._service_path, char, self._mock)
+            characteristic = _Characteristic(
+                index, self._service_path, char, self._mock, self.require_pairing
+            )
             self._chars.append(characteristic)
             reg_id = self._bus.register_object(
                 characteristic.path,
@@ -464,11 +668,28 @@ class BlueZPublisher:
                     Gio.dbus_error_quark(), Gio.DBusError.UNKNOWN_METHOD, "no such method"
                 )
                 return
+            # Real bug found via a live board test: bluetoothd's own log
+            # showed "src/gatt-database.c:client_ready_cb() No object
+            # received" right when RegisterApplication ran, and our async
+            # call() reported success anyway (BlueZ discards a rejected
+            # application silently rather than erroring the RegisterApplication
+            # call itself) -- `bluetoothctl`'s `list-attributes local`
+            # confirmed nothing was actually registered. Root cause, found
+            # by comparing against BlueZ's own test/example-gatt-server:
+            # GATT_SERVICE_IFACE's properties dict MUST include a
+            # `Characteristics` array of the service's own characteristic
+            # object paths, and GATT_CHRC_IFACE MUST include a `Descriptors`
+            # array (empty here, since this schema defines none) -- without
+            # these, BlueZ's validator cannot resolve the service's child
+            # objects from the ObjectManager reply alone and treats the
+            # whole application as having "no object".
+            characteristic_paths = [c.path for c in self._chars]
             objects: dict = {
                 self._service_path: {
                     GATT_SERVICE_IFACE: {
                         "UUID": GLib.Variant("s", _char_uuid(_SERVICE_SHORT_UUID)),
                         "Primary": GLib.Variant("b", True),
+                        "Characteristics": GLib.Variant("ao", characteristic_paths),
                     }
                 }
             }
@@ -477,16 +698,16 @@ class BlueZPublisher:
                     GATT_CHRC_IFACE: {
                         "UUID": GLib.Variant("s", _char_uuid(characteristic._char.uuid)),
                         "Service": GLib.Variant("o", self._service_path),
-                        "Flags": GLib.Variant(
-                            "as",
-                            {
-                                "read": ["read"],
-                                "notify": ["notify"],
-                                "read_notify": ["read", "notify"],
-                            }[characteristic._char.properties.value],
-                        ),
+                        "Flags": GLib.Variant("as", characteristic.flags()),
+                        "Descriptors": GLib.Variant("ao", []),
                     }
                 }
+                logger.info(
+                    "bluez_publisher: GetManagedObjects reporting %s (%s) flags=%s",
+                    characteristic._char.name,
+                    characteristic.path,
+                    characteristic.flags(),
+                )
             invocation.return_value(GLib.Variant("(a{oa{sa{sv}}})", (objects,)))
 
         app_path = "/org/unoq/nmea2000"
