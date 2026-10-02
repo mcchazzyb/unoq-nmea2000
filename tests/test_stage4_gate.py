@@ -306,10 +306,19 @@ def test_capture_resumes_once_storage_above_threshold(tmp_path):
         max_size=20,
     )
 )
-@settings(max_examples=50)
+@settings(max_examples=50, deadline=None)
 def test_every_frame_in_batch_persisted_before_outcome(tmp_path_factory, pgns):
     """Feature: nmea2000-diagnostic-platform, Property 1: raw-before-decode
-    ordering holds for an arbitrary mix of known/unknown PGNs in one batch."""
+    ordering holds for an arbitrary mix of known/unknown PGNs in one batch.
+
+    deadline=None: each example does real filesystem + SQLite I/O
+    (tmp_path_factory.mktemp, raw log append, session store), so wall-clock
+    time varies with host I/O latency (e.g. first-touch cost on a cold
+    filesystem cache) rather than reflecting a performance regression in the
+    code under test. Hypothesis's default 200ms deadline flagged this as
+    "flaky" on a Linux/WSL host where disk access patterns differ from
+    macOS; the property itself (not timing) is what this test asserts.
+    """
     tmp_path = tmp_path_factory.mktemp("stage4_prop")
     service, log, store = _service(tmp_path)
     frames = [_frame(pgn, source_address=i % 256) for i, pgn in enumerate(pgns)]
