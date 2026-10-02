@@ -251,6 +251,187 @@
 
   .panel-wide { grid-column: 1 / -1; }
 
+  /* --- Stage 7.6: user-configurable multi-instance dashboard (Requirement 29) --- */
+
+  #dashboard-section { grid-column: 1 / -1; }
+
+  #selection-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 0.5rem 0.85rem;
+    border-radius: 7px;
+    cursor: pointer;
+    min-height: 44px;
+  }
+  #selection-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+
+  #selection-panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem 1.1rem;
+    margin-bottom: 1px;
+  }
+  #selection-panel.open { display: block; }
+  #selection-panel h3 {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0.9rem 0 0.5rem;
+  }
+  #selection-panel h3:first-child { margin-top: 0; }
+
+  .instance-row { border-bottom: 1px solid var(--border); padding: 0.3rem 0; }
+  .instance-row:last-child { border-bottom: none; }
+  .instance-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 44px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  .instance-checkbox-label input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .instance-checkbox-label .instance-sub { color: var(--text-dim); font-size: 0.74rem; }
+
+  .attribute-checklist {
+    display: none;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.5rem 0 0.6rem 2rem;
+  }
+  .attribute-checklist.open { display: flex; }
+  .attribute-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 44px;
+    padding: 0 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-raised);
+    color: var(--text-mid);
+    font-size: 0.78rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .attribute-chip input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .attribute-chip.checked { color: var(--text); border-color: var(--accent); }
+
+  #dashboard-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1px;
+    background: var(--border);
+  }
+  @media (min-width: 480px) {
+    #dashboard-cards { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  }
+  .dash-card {
+    background: var(--surface);
+    padding: 0.9rem 1rem 1.1rem;
+    min-width: 0;
+  }
+  .dash-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+  }
+  .dash-card-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text-mid);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dash-card-reorder { display: flex; gap: 0.25rem; }
+  .dash-card-reorder button {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .dash-card-reorder button:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+  .dash-card-reorder button:disabled { opacity: 0.35; cursor: default; }
+  .dash-card.card-is-stale { outline: 1px dashed color-mix(in srgb, var(--stale) 50%, transparent); }
+
+  .dash-card-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+  }
+  .dash-gauge-wrap, .dash-metric-wrap { flex: 1 1 110px; min-width: 110px; }
+
+  .dash-gauge-wrap { text-align: center; }
+  .dash-gauge-svg { width: 100%; max-width: 128px; height: auto; }
+  .dash-gauge-value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.05rem;
+    font-weight: 700;
+    fill: var(--text);
+  }
+  .dash-gauge-value.is-stale { fill: var(--stale); }
+  .dash-gauge-value.is-invalid { fill: var(--offline); }
+  .dash-gauge-label {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    margin-top: 0.2rem;
+    text-transform: capitalize;
+  }
+
+  .dash-metric-wrap .metric-label { font-size: 0.74rem; display: block; margin-bottom: 0.1rem; }
+  .dash-metric-wrap .metric-value { font-size: 1.1rem; display: block; }
+
+  #dashboard-empty {
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    padding: 1.4rem 1rem;
+    text-align: center;
+    background: var(--surface);
+  }
+  #dashboard-empty button {
+    display: inline-block;
+    margin-top: 0.6rem;
+    min-height: 44px;
+    padding: 0 1rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 7px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
   @media (max-width: 480px) {
     header { padding: 0.8rem 1rem; }
     section.panel { padding: 0.9rem; }
@@ -264,6 +445,17 @@
 </header>
 
 <main>
+  <section class="panel panel-wide" id="dashboard-section">
+    <h2>My dashboard</h2>
+    <button id="selection-toggle" type="button" aria-expanded="false">Select sensors &amp; attributes</button>
+    <div id="selection-panel" aria-label="Sensor and attribute selection"></div>
+    <div id="dashboard-cards"></div>
+    <div id="dashboard-empty" style="display:none;">
+      No sensors selected yet.<br>
+      <button id="dashboard-empty-select" type="button">Select sensors to monitor</button>
+    </div>
+  </section>
+
   <section class="panel" id="engine-panel">
     <h2>Engine</h2>
     <div id="engine-fields"></div>
@@ -343,6 +535,305 @@
     cog: "\u00b0", sog: "m/s", heading: "\u00b0", depth: "m", water_temp: "\u00b0C", wind: "m/s",
   };
 
+  // --- Stage 7.6: user-configurable multi-instance dashboard (Requirement 29) ---
+  //
+  // This is a SECOND VIEW over the exact same WebSocket/REST payload the
+  // panels above already render (Requirement 29.8) -- no second poll loop,
+  // no second staleness computation. `renderLive()` below calls both the
+  // legacy fixed panels (kept for the single-instance case) and
+  // `renderDashboard()`.
+
+  const DASHBOARD_STORAGE_KEY = "unoq_dashboard_config_v1";
+
+  // Attributes with a defined natural display range render as a dial
+  // (Requirement 29.4); everything else stays a metric row (Requirement 29.5).
+  // `max` for rpm/fuel_rate/depth is a per-card user override (stored on the
+  // card), defaulting to the value below.
+  const GAUGE_RANGES = {
+    level_percent: { min: 0, max: 100 },
+    rpm: { min: 0, max: 6000 },
+    coolant_temp: { min: 0, max: 120 },
+    oil_pressure: { min: 0, max: 700000 },
+    fuel_rate: { min: 0, max: 40 },
+    battery_voltage: { min: 0, max: 16 },
+    charging_voltage: { min: 0, max: 16 },
+    depth: { min: 0, max: 50 },
+  };
+
+  const ENTITY_ATTRIBUTES = {
+    engine: ["rpm", "coolant_temp", "oil_pressure", "alternator_voltage", "fuel_rate", "engine_hours", "trim"],
+    tank: ["fluid_type", "level_percent", "capacity_litres", "quantity_remaining_litres"],
+    electrical: ["battery_voltage", "charging_voltage", "current", "battery_state", "dc_source"],
+    navigation: ["position", "cog", "sog", "heading", "depth", "water_temp", "wind"],
+  };
+
+  let dashboardConfig = loadDashboardConfig();
+  let latestLivePayload = null; // most recent renderLive() data, for re-render on config change
+
+  function loadDashboardConfig() {
+    try {
+      const raw = localStorage.getItem(DASHBOARD_STORAGE_KEY);
+      if (!raw) return { schema_version: 1, cards: [] };
+      const parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.cards)) return { schema_version: 1, cards: [] };
+      return parsed;
+    } catch (e) {
+      return { schema_version: 1, cards: [] }; // corrupt localStorage never breaks the page
+    }
+  }
+
+  function saveDashboardConfig() {
+    try {
+      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(dashboardConfig));
+    } catch (e) { /* storage unavailable (private mode, quota) -- selection just won't persist */ }
+  }
+
+  function findCard(entityType, instanceKey) {
+    return dashboardConfig.cards.find((c) => c.entity_type === entityType && c.instance_key === instanceKey);
+  }
+
+  function listDiscoveredInstances(data) {
+    // Every entity instance currently present in the live payload, as a
+    // flat selectable list (Requirement 29.1) -- engine/tank distinguished
+    // by instance:source, electrical/navigation as fixed singletons.
+    const instances = [];
+    for (const key of Object.keys(data.engines || {})) {
+      instances.push({ entity_type: "engine", instance_key: key, label: "Engine " + key });
+    }
+    for (const key of Object.keys(data.tanks || {})) {
+      instances.push({ entity_type: "tank", instance_key: key, label: "Tank " + key });
+    }
+    if (data.electrical) instances.push({ entity_type: "electrical", instance_key: "electrical", label: "Electrical" });
+    if (data.navigation) instances.push({ entity_type: "navigation", instance_key: "navigation", label: "Navigation" });
+    return instances;
+  }
+
+  function lookupEntity(data, entityType, instanceKey) {
+    if (entityType === "engine") return (data.engines || {})[instanceKey] || null;
+    if (entityType === "tank") return (data.tanks || {})[instanceKey] || null;
+    if (entityType === "electrical") return data.electrical || null;
+    if (entityType === "navigation") return data.navigation || null;
+    return null;
+  }
+
+  function toggleInstanceSelected(entityType, instanceKey, checked) {
+    if (checked) {
+      if (!findCard(entityType, instanceKey)) {
+        dashboardConfig.cards.push({
+          entity_type: entityType,
+          instance_key: instanceKey,
+          attributes: [],
+          order: dashboardConfig.cards.length,
+        });
+      }
+    } else {
+      dashboardConfig.cards = dashboardConfig.cards.filter(
+        (c) => !(c.entity_type === entityType && c.instance_key === instanceKey)
+      );
+    }
+    saveDashboardConfig();
+    renderSelectionPanel(latestLivePayload);
+    renderDashboard(latestLivePayload);
+  }
+
+  function toggleAttributeSelected(entityType, instanceKey, attribute, checked) {
+    const card = findCard(entityType, instanceKey);
+    if (!card) return;
+    if (checked && !card.attributes.includes(attribute)) card.attributes.push(attribute);
+    if (!checked) card.attributes = card.attributes.filter((a) => a !== attribute);
+    saveDashboardConfig();
+    renderSelectionPanel(latestLivePayload);
+    renderDashboard(latestLivePayload);
+  }
+
+  function moveCard(entityType, instanceKey, direction) {
+    const sorted = [...dashboardConfig.cards].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((c) => c.entity_type === entityType && c.instance_key === instanceKey);
+    const swapIdx = idx + direction;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return;
+    [sorted[idx], sorted[swapIdx]] = [sorted[swapIdx], sorted[idx]];
+    sorted.forEach((c, i) => { c.order = i; });
+    dashboardConfig.cards = sorted;
+    saveDashboardConfig();
+    renderDashboard(latestLivePayload);
+  }
+
+  function renderSelectionPanel(data) {
+    const panel = document.getElementById("selection-panel");
+    if (!data) { panel.innerHTML = ""; return; }
+    const instances = listDiscoveredInstances(data);
+    if (instances.length === 0) {
+      panel.innerHTML = '<p style="color:var(--text-dim);font-size:0.84rem;margin:0.4rem 0;">Nothing discovered yet -- sensors will appear here once the platform observes them.</p>';
+      return;
+    }
+    let html = "";
+    for (const inst of instances) {
+      const card = findCard(inst.entity_type, inst.instance_key);
+      const checked = !!card;
+      const rowId = inst.entity_type + "-" + inst.instance_key;
+      html += `<div class="instance-row">
+        <label class="instance-checkbox-label">
+          <input type="checkbox" data-instance-toggle="${rowId}" ${checked ? "checked" : ""}>
+          ${inst.label}
+        </label>
+        <div class="attribute-checklist ${checked ? "open" : ""}" data-instance-attrs="${rowId}">`;
+      const attrs = ENTITY_ATTRIBUTES[inst.entity_type] || [];
+      for (const attr of attrs) {
+        const attrChecked = card ? card.attributes.includes(attr) : false;
+        html += `<label class="attribute-chip ${attrChecked ? "checked" : ""}">
+          <input type="checkbox" data-attr-toggle="${rowId}|${attr}" ${attrChecked ? "checked" : ""}>
+          ${attr.replace(/_/g, " ")}
+        </label>`;
+      }
+      html += `</div></div>`;
+    }
+    panel.innerHTML = html;
+
+    panel.querySelectorAll("[data-instance-toggle]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const [entityType, ...rest] = input.dataset.instanceToggle.split("-");
+        const instanceKey = rest.join("-");
+        toggleInstanceSelected(entityType, instanceKey, input.checked);
+      });
+    });
+    panel.querySelectorAll("[data-attr-toggle]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const [rowId, attr] = input.dataset.attrToggle.split("|");
+        const [entityType, ...rest] = rowId.split("-");
+        const instanceKey = rest.join("-");
+        toggleAttributeSelected(entityType, instanceKey, attr, input.checked);
+      });
+    });
+  }
+
+  function describeGaugeStroke(fraction) {
+    // Inline SVG arc, deliberately not canvas-library-based: a canvas that
+    // sizes itself from its container can feed back into the page's own
+    // layout and never settle. A fixed 100x100 viewBox has no such
+    // feedback path. 3/4-swept circle.
+    const circumference = 2 * Math.PI * 40;
+    const sweep = circumference * 0.75;
+    const dash = Math.max(0, Math.min(1, fraction)) * sweep;
+    return { circumference, sweep, dash };
+  }
+
+  function renderGauge(attribute, value, isUnset, qualityClass) {
+    const range = GAUGE_RANGES[attribute];
+    const fraction = isUnset || value === null ? 0 : (value - range.min) / (range.max - range.min);
+    const { sweep, dash } = describeGaugeStroke(fraction);
+    const display = isUnset ? "--" : formatValue(attribute, value);
+    const unit = UNITS[attribute] || "";
+    return `<div class="dash-gauge-wrap">
+      <svg class="dash-gauge-svg" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)"
+          stroke-width="8" stroke-dasharray="${sweep} 999" stroke-linecap="round"
+          transform="rotate(135 50 50)"/>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--accent)"
+          stroke-width="8" stroke-dasharray="${dash} 999" stroke-linecap="round"
+          transform="rotate(135 50 50)"/>
+        <text x="50" y="54" text-anchor="middle" class="dash-gauge-value ${qualityClass}">${display}</text>
+      </svg>
+      <div class="dash-gauge-label">${attribute.replace(/_/g, " ")}${unit ? " (" + unit + ")" : ""}</div>
+    </div>`;
+  }
+
+  function renderMetricCell(attribute, value, isUnset, qualityClass) {
+    const unit = UNITS[attribute] ? `<span class="unit">${UNITS[attribute]}</span>` : "";
+    const display = isUnset ? "unset" : formatValue(attribute, value) + unit;
+    const classes = ["metric-value"];
+    if (isUnset) classes.push("is-unset");
+    else classes.push(qualityClass);
+    return `<div class="dash-metric-wrap">
+      <span class="metric-label">${attribute.replace(/_/g, " ")}</span>
+      <span class="${classes.join(" ")}">${display}</span>
+    </div>`;
+  }
+
+  function renderDashboardCard(card, data) {
+    const entity = lookupEntity(data, card.entity_type, card.instance_key);
+    // Requirement 29.10: an instance no longer in the live payload keeps
+    // rendering its last-known values with stale styling, rather than the
+    // card disappearing.
+    const isStale = !entity;
+    const sourceEntity = entity || card._lastEntity || null;
+    if (entity) card._lastEntity = entity; // last-known snapshot kept on the in-memory card only
+
+    const title = card.entity_type.charAt(0).toUpperCase() + card.entity_type.slice(1) + " " + card.instance_key;
+    const sorted = [...dashboardConfig.cards].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((c) => c.entity_type === card.entity_type && c.instance_key === card.instance_key);
+
+    let bodyHtml = "";
+    if (!sourceEntity || card.attributes.length === 0) {
+      bodyHtml = '<p style="color:var(--text-dim);font-size:0.8rem;margin:0;">No attributes selected.</p>';
+    } else {
+      const provenance = sourceEntity.provenance || null;
+      const quality = provenance ? provenance.quality : null;
+      let qualityClass = "is-stale";
+      if (!isStale) {
+        if (quality === "invalid") qualityClass = "is-invalid";
+        else if (quality === "stale") qualityClass = "is-stale";
+        else if (quality === "unknown") qualityClass = "is-unknown-quality";
+        else qualityClass = "";
+      }
+      bodyHtml = '<div class="dash-card-grid">';
+      for (const attr of card.attributes) {
+        const value = sourceEntity[attr];
+        const isUnset = value === null || value === undefined;
+        bodyHtml += GAUGE_RANGES[attr]
+          ? renderGauge(attr, value, isUnset, qualityClass)
+          : renderMetricCell(attr, value, isUnset, qualityClass);
+      }
+      bodyHtml += "</div>";
+    }
+
+    return `<div class="dash-card${isStale ? " card-is-stale" : ""}">
+      <div class="dash-card-head">
+        <span class="dash-card-title">${title}${isStale ? " (stale)" : ""}</span>
+        <span class="dash-card-reorder">
+          <button type="button" data-move="${card.entity_type}|${card.instance_key}|-1" ${idx === 0 ? "disabled" : ""} aria-label="Move up">&uarr;</button>
+          <button type="button" data-move="${card.entity_type}|${card.instance_key}|1" ${idx === sorted.length - 1 ? "disabled" : ""} aria-label="Move down">&darr;</button>
+        </span>
+      </div>
+      ${bodyHtml}
+    </div>`;
+  }
+
+  function renderDashboard(data) {
+    const container = document.getElementById("dashboard-cards");
+    const emptyState = document.getElementById("dashboard-empty");
+    if (dashboardConfig.cards.length === 0) {
+      container.innerHTML = "";
+      emptyState.style.display = "block";
+      return;
+    }
+    emptyState.style.display = "none";
+    if (!data) { container.innerHTML = ""; return; }
+    const sorted = [...dashboardConfig.cards].sort((a, b) => a.order - b.order);
+    container.innerHTML = sorted.map((card) => renderDashboardCard(card, data)).join("");
+    container.querySelectorAll("[data-move]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const [entityType, instanceKey, direction] = btn.dataset.move.split("|");
+        moveCard(entityType, instanceKey, parseInt(direction, 10));
+      });
+    });
+  }
+
+  document.getElementById("selection-toggle").addEventListener("click", () => {
+    const panel = document.getElementById("selection-panel");
+    const btn = document.getElementById("selection-toggle");
+    const nowOpen = !panel.classList.contains("open");
+    panel.classList.toggle("open", nowOpen);
+    btn.setAttribute("aria-expanded", String(nowOpen));
+    if (nowOpen) renderSelectionPanel(latestLivePayload);
+  });
+  document.getElementById("dashboard-empty-select").addEventListener("click", () => {
+    document.getElementById("selection-panel").classList.add("open");
+    document.getElementById("selection-toggle").setAttribute("aria-expanded", "true");
+    renderSelectionPanel(latestLivePayload);
+  });
+
+  // --- end Stage 7.6 ---
+
   function renderEntityFields(containerId, entity, fieldOrder, entityKeyPrefix) {
     const container = document.getElementById(containerId);
     if (!entity) {
@@ -404,6 +895,8 @@
   }
 
   function renderLive(data) {
+    latestLivePayload = data; // Stage 7.6: feeds the dashboard cards too (Requirement 29.8)
+
     const engineKeys = Object.keys(data.engines || {});
     if (engineKeys.length === 0) {
       document.getElementById("engine-fields").innerHTML = '<div class="metric-row empty"><span class="metric-label">No engine data yet</span></div>';
@@ -429,6 +922,7 @@
 
     lastUpdateAt = Date.now();
     setConnIndicator(data.stale ? "stale" : "online");
+    renderDashboard(data); // Stage 7.6
   }
 
   function renderDiscoveryEmpty() {
@@ -528,6 +1022,7 @@
 
   startRestFallback();
   connectWebSocket();
+  renderDashboard(null); // Stage 7.6: show empty state immediately, before first payload
 })();
 </script>
 </body>

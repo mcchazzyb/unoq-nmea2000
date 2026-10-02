@@ -391,7 +391,7 @@ properties (Properties 1-39 in design.md) it proves.
   - Run `make test lint run-api test-integration`
   - _Validates: Properties 16 (full), 20, 21, 22 (full), 24 (full), 25, 26, 27, 36_
 
-- [ ] 7.6 User-configurable multi-instance dashboard (selectable sensors + gauges)
+- [x] 7.6 User-configurable multi-instance dashboard (selectable sensors + gauges)
   - Add a selection panel to `web/static/index.html` listing every entity instance
     currently present in `/api/v1/live` (each engine/tank keyed by `instance:source`,
     plus the electrical/navigation singletons), with a checkbox per instance and a
@@ -419,16 +419,20 @@ properties (Properties 1-39 in design.md) it proves.
     stale/quality-badge styling rather than disappearing (_Requirement 29.10_)
   - _Requirements: 29.1-29.10_
 
-- [ ] 7.7 Stage Gate — configurable dashboard
+- [~] 7.7 Stage Gate — configurable dashboard (partial — static tests done, formal property test open)
   - DOM/unit tests: selecting/deselecting an instance adds/removes exactly its card;
     selecting a subset of attributes renders exactly that subset; reordering persists
     and survives a simulated reload (localStorage round-trip); an attribute in the range
     table renders a dial, one outside it renders a metric row; a card for an
     instance_key no longer in the live payload keeps its last values and stale styling
   - Property test: dashboard rendering equals exactly the persisted selection and survives
-    a reload with no further user action (Property 40)
+    a reload with no further user action (Property 40) — not yet written as a Hypothesis
+    property test; the manual Node-DOM-stub smoke test (7 assertions, selection add/
+    remove, attribute toggling, gauge/metric split, reorder, localStorage round-trip)
+    and the static `tests/test_stage7_dashboard_gate.py` suite (15 tests) cover the
+    same ground example-by-example but Property 40 itself remains open
   - Run `make test lint run-api`
-  - _Validates: Property 40; Requirements 29.1-29.10_
+  - _Validates: Property 40 (partial -- see note above); Requirements 29.1-29.10_
 
 - [ ] 7.8 Mobile-first Web_UI layout
   - Rework `web/static/index.html`'s base (no-media-query) CSS to target a phone
