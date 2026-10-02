@@ -430,6 +430,44 @@ properties (Properties 1-39 in design.md) it proves.
   - Run `make test lint run-api`
   - _Validates: Property 40; Requirements 29.1-29.10_
 
+- [ ] 7.8 Mobile-first Web_UI layout
+  - Rework `web/static/index.html`'s base (no-media-query) CSS to target a phone
+    portrait viewport directly: single-column card stack, gauge/font sizing for
+    arm's-length outdoor reading, with the existing desktop grid moved behind a
+    `@media (min-width: 768px)` rule rather than being the default
+    (_Requirement 30.1_)
+  - Apply a minimum 44x44 CSS pixel touch target to every interactive control added for
+    Requirement 29 (instance checkboxes, attribute checklist entries, reorder controls)
+    (_Requirement 30.2_)
+  - Extend the existing 320-1920px no-horizontal-scroll check with explicit assertions
+    at 320px, 375px, and 430px covering the dashboard cards and gauges from Stage 7.6
+    (_Requirement 30.3_)
+  - _Requirements: 30.1-30.3_
+
+- [ ] 7.9 LAN bind for phone testing, with an explicit never-wildcard guard
+  - Extend `web/main.py`'s bind-host guard from its current `10.`/`192.168.` prefix
+    check to the full RFC 1918 range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) via
+    `ipaddress.ip_address(host).is_private and not is_loopback`, while explicitly
+    keeping the existing refusal of `0.0.0.0`/`::` and any non-private address
+    (_Requirement 30.4, 30.5_)
+  - Add `docs/testing.md` (or `docs/api.md`) a "testing from your phone" section:
+    discovering the Host_Platform's LAN IP on macOS/Linux/Windows, the
+    `UNOQ_BIND_HOST=<ip> make run-api` invocation, and an explicit no-authentication/
+    trusted-network-only warning (_Requirement 30.6_)
+  - _Requirements: 30.4-30.6_
+
+- [ ] 7.10 Stage Gate — mobile-first layout and LAN bind guard
+  - Unit tests: bind guard accepts loopback, a 10.x address, a 172.16-31.x address, and
+    a 192.168.x address (the common home/marina-router and Arduino-UNO-Q-advertised
+    range); bind guard refuses `0.0.0.0`, `::`, and a public address, in every case
+    with no change to the existing refusal behavior
+  - Property test: the bind guard accepts iff loopback or private-non-unspecified, for
+    arbitrary candidate host strings including malformed ones (Property 41)
+  - DOM/viewport tests at 320px/375px/430px confirming no horizontal scroll and
+    44x44px minimum touch targets on Requirement 29's controls
+  - Run `make test lint run-api`
+  - _Validates: Property 41; Requirements 14.3, 30.1-30.6_
+
 ## Stage 8 — Host-stack hardening and sign-off
 
 - [x] 8.1 Capture promotion to golden fixtures
@@ -496,12 +534,12 @@ properties (Properties 1-39 in design.md) it proves.
     and the Stage 3/6 pinning tests together. Property 33 now certified against the
     corrected formula.
   - **This gate is the pass/fail checkpoint for the entire host-testable MVP.** All of
-    Requirements 1-23, 25, and 27-29 (host-testable scope) and Properties 1-31, 33-40
+    Requirements 1-23, 25, and 27-30 (host-testable scope) and Properties 1-31, 33-41
     must be demonstrated green here before Stage 9 (hardware) begins. The formula
     decision is resolved; the second-OS run (on the user's WSL box) and the new
-    Stage 7.6/7.7 configurable-dashboard work (Requirement 29, Property 40) both
-    remain before this box can be checked `[x]`.
-  - _Validates: full regression suite; Requirements 19.1-19.5, 23.1-23.4, 25.4, 29.1-29.10_
+    Stage 7.6-7.10 configurable-dashboard/mobile-first/LAN-bind work (Requirements 29-30,
+    Properties 40-41) both remain before this box can be checked `[x]`.
+  - _Validates: full regression suite; Requirements 19.1-19.5, 23.1-23.4, 25.4, 29.1-29.10, 30.1-30.6_
 
 ---
 

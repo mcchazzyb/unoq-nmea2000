@@ -520,7 +520,7 @@ FastAPI + Uvicorn. Pydantic models map to the Domain_Model; auto OpenAPI feeds d
 | `WS /api/v1/live/ws` | live push (WebSocket; SSE fallback) |
 
 Cross-cutting rules:
-- **Local-only binding:** bind to loopback and configured local interfaces; never a publicly routable interface by default (Requirement 14.3).
+- **Local-only binding:** bind to loopback and configured local interfaces; never a publicly routable interface by default (Requirement 14.3). The configured local interface MUST be loopback or a private RFC 1918 address (never a wildcard `0.0.0.0`/`::`) — see *Mobile-First Design and LAN Testing Access* for the phone-testing bind mechanism and its guard (Requirement 30.4-30.6).
 - **Validation:** every parameter validated against declared type and range via Pydantic; invalid/missing/out-of-range params are rejected without performing the operation, with an error naming the failed parameter (Requirements 14.4, 14.5).
 - **Limits:** reject replay/log requests exceeding **10 concurrent** operations or referencing a file **> 100 MB**, with an error naming the exceeded limit (Requirement 14.6). Live push capped at **one update per 250 ms per client** (Requirement 14.2).
 - **Safe path resolution:** log/replay file paths resolve within the configured capture directory; any resolved path outside it is rejected without access, error indicating the path is not permitted (Requirements 14.7, 14.8). Implemented with `Path.resolve()` + `is_relative_to(capture_dir)`.
@@ -580,6 +580,35 @@ Attributes outside this table (`position`, `status`, `dc_source`, `battery_state
 **Persistence (Requirement 29.7):** `localStorage.setItem('dashboard_config_v1', JSON.stringify(config))` on every selection/reorder change; read once on page load. No server-side storage, no new endpoint — keeps the feature entirely within the existing local-only, no-outbound-request constraint (steering 12) and needs no Session_Store schema change.
 
 **Stale/vanished instance (Requirement 29.10):** a card's `instance_key` is looked up in the latest payload on each render tick; if absent, the card keeps rendering its last-received values with the existing `.is-stale`/quality-badge styling rather than disappearing — consistent with how the rest of the UI treats staleness, and avoiding a surprising "my gauge vanished" experience when a sensor drops out briefly.
+
+### Mobile-First Design and LAN Testing Access (Requirement 30)
+
+The Web_UI was built responsive (320-1920px, Requirement 15.3) but desktop-first in practice: a CSS grid that reflows down to a phone width rather than a layout actually designed for one-handed cockpit use. Requirement 30 reverses that priority without discarding the existing responsive range.
+
+**Mobile-first layout (30.1-30.3):** the base (no-media-query) CSS targets a phone portrait viewport directly — single-column card stack by default, gauge diameter and font sizes tuned for arm's-length outdoor reading, `min-width: 44px; min-height: 44px` on every interactive control added for Requirement 29 (instance checkboxes, attribute checklist entries, reorder buttons) per the WCAG 2.5.5/Apple HIG touch-target floor. A `@media (min-width: 768px)` rule then widens to the existing multi-column desktop grid — the existing 1920px ceiling and the discovery table are untouched; only the base/mobile breakpoint's own design priority flips from "desktop that happens to reflow" to "phone that happens to also work wide." The existing 320-1920px no-horizontal-scroll test is extended with explicit checks at 320px, 375px (common phone width), and 430px (large phone) rather than only the two ends of the range.
+
+**LAN bind for phone testing (30.4-30.6):** `web/main.py` already defines the right shape — `UNOQ_BIND_HOST` env var, defaulting to `127.0.0.1`, with an explicit guard before `uvicorn.run()` that currently accepts loopback plus `10.`/`192.168.` prefixes. Requirement 30 formalizes and completes this mechanism rather than replacing it:
+
+```python
+# web/main.py — extend the existing private-range guard (10., 192.168.)
+# to the full RFC 1918 set, and keep refusing 0.0.0.0/:: explicitly
+import ipaddress
+
+def _is_permitted_bind_host(host: str) -> bool:
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return True
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if addr.is_unspecified:          # 0.0.0.0, :: — never permitted (Req 30.5)
+        return False
+    return addr.is_private and not addr.is_loopback
+```
+
+This is a **deliberate, narrow extension** of an existing safety guard, not a relaxation: `0.0.0.0`/`::` (every interface on the host, including any publicly routable one) stay refused exactly as the current code already refuses out-of-range hosts. What becomes possible is binding to the Host_Platform's own named private-LAN address (e.g. `192.168.1.42`, discovered via `ipconfig getifaddr en0` on macOS or `hostname -I` on Linux) — a phone on the same WiFi can then load `http://192.168.1.42:8000/`. The guard still requires the caller to **name their own interface explicitly**; it never does interface discovery or binds a wildcard on the caller's behalf, keeping Requirement 14.3's "never a publicly routable interface by default" intact (loopback is still the default; the private-LAN bind is still an explicit opt-in override).
+
+`docs/testing.md` gets a short "testing from your phone" section: how to find the LAN IP on macOS/Linux/Windows, the `UNOQ_BIND_HOST=<your-ip> make run-api` invocation, and an explicit warning that the Web_API carries no authentication (Requirement 14 has no auth requirement — unlike BLE's Requirement 28 pairing model) so this should only ever be done on a trusted private network, never on, e.g., open marina/public WiFi.
 
 ### Simulator and Fixtures (Requirements 17, 25)
 
@@ -916,3 +945,9 @@ Requirement 19.
 *For any* set of selected entity instances, selected attributes per instance, and card order saved to the dashboard configuration, the set of cards rendered equals exactly the selected instances, each card shows exactly its selected attributes, and reloading the page with no further user action reproduces the same cards, attributes, and order from the persisted configuration alone.
 
 **Validates: Requirements 29.1, 29.2, 29.3, 29.6, 29.7**
+
+### Property 41: The Web_API bind guard never permits a wildcard or non-private address
+
+*For any* string passed as the configured bind host, the Web_API accepts it if and only if it is loopback (127.0.0.1, localhost, ::1) or a valid RFC 1918 private address that is not unspecified; a wildcard address (0.0.0.0 or ::) or any address outside the private ranges is always refused, regardless of configuration.
+
+**Validates: Requirements 14.3, 30.4, 30.5**

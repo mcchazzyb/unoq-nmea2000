@@ -444,6 +444,19 @@ This document defines requirements only (the "what"). Architecture and implement
 9. WHILE no entity instances are selected, THE Web_UI SHALL display an empty-state indicator in the dashboard area directing the user to the selection view, distinct from the discovery view's own empty-state indicator (_Requirement 15.9_).
 10. WHEN a previously selected entity instance stops being discovered (for example its NodeKey goes offline or its instance key disappears from the Live_State_Cache), THE Web_UI SHALL continue displaying its card using the last known values marked stale, consistent with the staleness handling in Requirement 20.6, rather than silently removing the user's selection.
 
+### Requirement 30: Mobile-First Rendering and LAN Testing Access
+
+**User Story:** As a boat owner, I want the dashboard to be designed primarily for a phone held in a cockpit, and I want to be able to load it from my phone over my own WiFi while developing, so that the primary way I will actually use this tool works well and I can test it from the device I will really use.
+
+#### Acceptance Criteria
+
+1. THE Web_UI SHALL be designed primarily for a mobile phone viewport (an "operate from your phone" surface first, a wider desktop/tablet layout second), with touch targets, gauge sizing, and card density chosen for a one-handed phone held at arm's length in variable outdoor light, rather than a desktop layout that merely reflows to fit a phone screen.
+2. THE Web_UI SHALL size all interactive controls introduced by Requirement 29 (instance checkboxes, attribute checklist, reorder controls) to a minimum 44x44 CSS pixel touch target.
+3. THE Web_UI SHALL render its primary dashboard content, including the Requirement 29 gauges and cards, without horizontal scrolling or clipped content at the 320-430 pixel phone-portrait width range, in addition to the existing 320-1920 pixel range already required by Requirement 15.3.
+4. THE Platform SHALL provide a documented, explicit configuration mechanism (for example an environment variable) allowing the Web_API to bind to a configured private local-network interface address for the purpose of loading the Web_UI from another device, such as a phone, on the same local network during development or on-boat use.
+5. THE configuration mechanism in Criterion 4 SHALL continue to default to loopback-only binding per Requirement 14.3, SHALL accept only loopback or an address within a private, non-publicly-routable range (RFC 1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), and SHALL refuse an unqualified wildcard bind address (0.0.0.0 or ::) and any address outside those ranges, requiring the caller to name a specific private interface address explicitly rather than binding every interface on the host.
+6. THE Platform SHALL document, in docs/api.md or docs/testing.md, how to discover the Host_Platform's own private LAN address and configure the mechanism in Criterion 4 to load the Web_UI from a phone on the same network, including a warning that the Web_API has no authentication and SHOULD only be exposed on a trusted private network.
+
 ### Requirement 28: BLE Access Security and Privacy
 
 **User Story:** As a boat owner, I want my vessel data protected from nearby readers, so that read-only access does not mean open access to GPS position and vessel status.
