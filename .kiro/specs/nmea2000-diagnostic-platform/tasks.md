@@ -690,6 +690,16 @@ properties (Properties 1-39 in design.md) it proves.
     session's chat history; or confirm the ADM3055E/shield's power-on-reset default for the
     SILENT pin from the datasheet, which may satisfy 24.9 by hardware design without a
     direct measurement.
+  - **Update 2026-10-03:** a multimeter arrives today, so this gate is unblocked. Next
+    session, FIRST read the ADM3055E datasheet and the EVAL-ADM3055E-ARDZ user guide for the
+    SILENT pin power-on default (RTFM rule, steering 14), THEN measure. Board powered and
+    CAN-H/CAN-L NOT connected to any Backbone. Meter on DC volts, black probe on GND, red on
+    the SILENT/D4 line (P5 shunt fitted). Record the voltage and what it means
+    (silent = transmit disabled) at three points: (1) power-on ramp (watch the first second,
+    use min/max hold if the meter has it), (2) MCU reset (press reset, watch for any
+    excursion away from the silent level), (3) steady state after sketch startup. Pass =
+    the line stays at the silent level in all three. Write the readings into the
+    Hardware_Setup_Guide (24.9). Only after that may CAN-H/CAN-L touch a live Backbone.
   - _Validates: 1.2, 1.3, 1.5, 1.6, 24.2-24.9_
 
 ## Stage 10 — Deployment, equivalence, real BLE, and final docs
