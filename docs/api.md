@@ -37,6 +37,23 @@ Keys in `engines`/`tanks` are `"{instance}:{source_address}"` — the same
 instance-keying rule as the domain model itself (steering 07). A field with
 no decoded value (`UNSET` internally) is serialized as JSON `null`.
 
+`/live` (and the WebSocket) also carry a `fuel` object: `remaining_litres`,
+`burn_lph`, `endurance_h`, `range_nm`, `needs_capacity` (fuel tank keys that
+have a level but no size), `oldest_input_updated_at`, and `derivation`. Each
+figure is `null` unless every input it needs is known (never a partial sum).
+It is a derived value: all fuel tanks (tank type 0) divided by all engines'
+`fuel_rate`, and range uses speed over ground.
+
+### `GET /api/v1/settings` and `PUT /api/v1/settings/tanks`
+
+Owner-set fuel tank sizes in litres, saved on the board (`settings.json` in
+the capture directory, so they survive restarts). Keys are
+`"<instance>:<source_address>"`, the same key `/live` uses. `PUT` replaces the
+whole map: `{"capacities": {"0:42": 200}}`. A size must be above 0 and at most
+20000; a bad value returns 400 naming `capacities`. A set size overrides the
+sender's own capacity and the tank's litres remaining is marked `derived`
+(`... * configured_capacity_litres (owner setting)`).
+
 ### `GET /api/v1/nodes`
 
 Discovered node inventory from `DiscoveryMode`, split into `known` (NAME

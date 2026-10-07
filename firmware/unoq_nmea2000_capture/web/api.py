@@ -23,6 +23,8 @@ from protocol.domain import UNSET
 from service.cache import LiveStateCache
 from service.discovery import DiscoveryMode
 from service.raw_log import CorruptLine, iter_records
+from web.fuel import apply_configured_capacity, fuel_summary
+from web.settings import SettingsStore
 
 #: Requirement 14.6: reject beyond this many concurrent replay/log operations.
 MAX_CONCURRENT_OPERATIONS = 10
@@ -93,11 +95,17 @@ class ReplayRequest(BaseModel):
     log_id: str = Field(..., min_length=1, max_length=255)
 
 
+class TankSettingsRequest(BaseModel):
+    # Validated by web.settings so the error can name the exact bad tank.
+    capacities: dict[str, object]
+
+
 def create_app(
     cache: LiveStateCache,
     discovery: DiscoveryMode,
     capture_dir: Path,
     device_info: Optional[dict] = None,
+    settings: Optional[SettingsStore] = None,
 ) -> FastAPI:
     """Build the FastAPI app wired to a specific cache/discovery/capture_dir.
 
@@ -108,6 +116,7 @@ def create_app(
     app = FastAPI(title="unoq-nmea2000 Web_API")
     capture_dir = capture_dir.resolve()
     device_info = device_info or {}
+    settings = settings or SettingsStore(capture_dir / "settings.json")
     _active_operations = {"count": 0}
     _ws_last_push: dict[int, float] = {}
 
@@ -139,20 +148,42 @@ def create_app(
             "device_info": device_info,
         }
 
-    @app.get("/api/v1/live")
-    def get_live():
+    def _live_payload() -> dict:
+        """One builder for REST and WebSocket so they can never disagree."""
         vessel = cache.snapshot()
+        engines = {f"{k[0]}:{k[1]}": _entity_to_response_dict(v) for k, v in vessel.engines.items()}
+        tanks = {f"{k[0]}:{k[1]}": _entity_to_response_dict(v) for k, v in vessel.tanks.items()}
+        apply_configured_capacity(tanks, settings.tank_capacities())
+        electrical = _entity_to_response_dict(vessel.electrical) if vessel.electrical else None
+        navigation = _entity_to_response_dict(vessel.navigation) if vessel.navigation else None
         return {
-            "engines": {
-                f"{k[0]}:{k[1]}": _entity_to_response_dict(v) for k, v in vessel.engines.items()
-            },
-            "tanks": {
-                f"{k[0]}:{k[1]}": _entity_to_response_dict(v) for k, v in vessel.tanks.items()
-            },
-            "electrical": _entity_to_response_dict(vessel.electrical) if vessel.electrical else None,
-            "navigation": _entity_to_response_dict(vessel.navigation) if vessel.navigation else None,
+            "engines": engines,
+            "tanks": tanks,
+            "electrical": electrical,
+            "navigation": navigation,
+            "fuel": fuel_summary(tanks, engines, navigation),
             "stale": cache.is_stale(),
         }
+
+    @app.get("/api/v1/live")
+    def get_live():
+        return _live_payload()
+
+    @app.get("/api/v1/settings")
+    def get_settings():
+        return {"tank_capacity_litres": settings.tank_capacities()}
+
+    @app.put("/api/v1/settings/tanks")
+    def put_tank_settings(request: TankSettingsRequest):
+        """Replace all owner-set tank sizes (litres), keyed '<instance>:<source_address>'."""
+        try:
+            saved = settings.set_tank_capacities(request.capacities)
+        except ValueError as exc:
+            raise ValidationError("capacities", str(exc))
+        except OSError:
+            # Disk full / read-only: report it, keep serving (steering 11).
+            raise HTTPException(status_code=507, detail={"error": "could not save settings"})
+        return {"tank_capacity_litres": saved}
 
     @app.get("/api/v1/nodes")
     def get_nodes():
@@ -278,26 +309,8 @@ def create_app(
                 now = time.time()
                 last = _ws_last_push.get(client_key, 0.0)
                 if (now - last) >= MIN_PUSH_INTERVAL_S:
-                    vessel = cache.snapshot()
-                    payload = {
-                        "engines": {
-                            f"{k[0]}:{k[1]}": _entity_to_response_dict(v)
-                            for k, v in vessel.engines.items()
-                        },
-                        "tanks": {
-                            f"{k[0]}:{k[1]}": _entity_to_response_dict(v)
-                            for k, v in vessel.tanks.items()
-                        },
-                        "electrical": _entity_to_response_dict(vessel.electrical)
-                        if vessel.electrical
-                        else None,
-                        "navigation": _entity_to_response_dict(vessel.navigation)
-                        if vessel.navigation
-                        else None,
-                        "stale": cache.is_stale(),
-                    }
                     try:
-                        await websocket.send_text(json.dumps(payload))
+                        await websocket.send_text(json.dumps(_live_payload()))
                     except WebSocketDisconnect:
                         break
                     _ws_last_push[client_key] = now

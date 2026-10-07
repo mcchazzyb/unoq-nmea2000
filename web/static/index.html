@@ -282,6 +282,28 @@
   }
   #selection-toggle:hover { color: var(--text); border-color: var(--text-dim); }
 
+  /* Fuel endurance + boat settings (phone-first, 44px touch targets) */
+  #fuel-note, #settings-help { font-size: 0.78rem; color: var(--text-dim); margin-top: 0.6rem; line-height: 1.45; }
+  #fuel-note a { color: var(--accent); }
+  #tank-settings .setting-row {
+    display: flex; align-items: center; gap: 0.6rem; min-height: 44px;
+    border-bottom: 1px solid var(--border); padding: 0.3rem 0;
+  }
+  #tank-settings .setting-label { flex: 1; font-size: 0.86rem; color: var(--text-mid); }
+  #tank-settings .setting-label small { color: var(--text-dim); }
+  #tank-settings input {
+    width: 6.5rem; min-height: 44px; font: 600 1rem var(--mono); text-align: right;
+    background: var(--surface-raised); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px; padding: 0 0.6rem;
+  }
+  #tank-settings .setting-unit { font-size: 0.72rem; color: var(--text-dim); width: 2.6rem; }
+  #tank-settings-save {
+    margin-top: 0.8rem; min-height: 44px; padding: 0 1.1rem; font-weight: 600; font-size: 0.86rem;
+    background: var(--accent); color: #04121f; border: 0; border-radius: 7px; cursor: pointer;
+  }
+  #settings-status { margin-left: 0.8rem; font-size: 0.78rem; color: var(--text-mid); }
+  #settings-status.error { color: var(--offline); }
+
   #unit-toggle {
     display: flex;
     align-items: center;
@@ -488,11 +510,6 @@
 <main>
   <section class="panel panel-wide" id="dashboard-section">
     <h2>My dashboard</h2>
-    <div id="unit-toggle" role="group" aria-label="Volume and flow display unit">
-      <span class="unit-toggle-label">Units:</span>
-      <button type="button" data-unit="litres" aria-pressed="true">Litres</button>
-      <button type="button" data-unit="us_gallons" aria-pressed="false">US gal</button>
-    </div>
     <button id="selection-toggle" type="button" aria-expanded="false">Select sensors &amp; attributes</button>
     <div id="selection-panel" aria-label="Sensor and attribute selection"></div>
     <div id="dashboard-cards"></div>
@@ -512,6 +529,12 @@
     <div id="tank-fields"></div>
   </section>
 
+  <section class="panel" id="fuel-panel">
+    <h2>Fuel endurance</h2>
+    <div id="fuel-figures"></div>
+    <div id="fuel-note"></div>
+  </section>
+
   <section class="panel" id="electrical-panel">
     <h2>Electrical</h2>
     <div id="electrical-fields"></div>
@@ -520,6 +543,21 @@
   <section class="panel" id="navigation-panel">
     <h2>Navigation</h2>
     <div id="navigation-fields"></div>
+  </section>
+
+  <section class="panel panel-wide" id="settings-panel">
+    <h2>Boat settings</h2>
+    <div id="unit-toggle" role="group" aria-label="Volume and flow display unit">
+      <span class="unit-toggle-label">Display units:</span>
+      <button type="button" data-unit="litres" aria-pressed="true">Litres</button>
+      <button type="button" data-unit="us_gallons" aria-pressed="false">US gal</button>
+    </div>
+    <p id="settings-help">Fuel tank sizes in litres. Used for litres remaining, endurance and range. Saved on the board, so every phone sees the same values.</p>
+    <form id="tank-settings" novalidate>
+      <div id="tank-setting-rows"></div>
+      <button id="tank-settings-save" type="submit">Save tank sizes</button>
+      <span id="settings-status" role="status" aria-live="polite"></span>
+    </form>
   </section>
 
   <section class="panel panel-wide">
@@ -583,12 +621,13 @@
     return String(value);
   }
 
+  const MPS_TO_KNOTS = 3600 / 1852; // exact: 1 knot = 1852 m per hour
   const UNITS = {
     rpm: "rpm", coolant_temp: "\u00b0C", oil_pressure: "Pa", alternator_voltage: "V",
     fuel_rate: "L/h", engine_hours: "s", trim: "%",
     level_percent: "%", capacity_litres: "L", quantity_remaining_litres: "L",
     battery_voltage: "V", charging_voltage: "V", current: "A",
-    cog: "\u00b0", sog: "m/s", heading: "\u00b0", depth: "m", water_temp: "\u00b0C", wind: "m/s",
+    cog: "\u00b0", sog: "kn", heading: "\u00b0", depth: "m", water_temp: "\u00b0C", wind: "kn",
   };
 
   // --- Stage 7.11: display-only litres / US gallons toggle (Requirement 29.11, 29.12) ---
@@ -654,6 +693,8 @@
     if (typeof rawValue === "number" && VOLUME_OR_RATE_ATTRIBUTES.has(attribute)) {
       return formatVolumeOrRate(attribute, rawValue).value;
     }
+    // SOG and wind speed arrive in m/s (NMEA 2000 wire unit); boaters read knots.
+    if (typeof rawValue === "number" && (attribute === "sog" || attribute === "wind")) return rawValue * MPS_TO_KNOTS;
     return rawValue;
   }
 
@@ -928,6 +969,7 @@
         <span class="dash-card-reorder">
           <button type="button" data-move="${card.entity_type}|${card.instance_key}|-1" ${idx === 0 ? "disabled" : ""} aria-label="Move up">&uarr;</button>
           <button type="button" data-move="${card.entity_type}|${card.instance_key}|1" ${idx === sorted.length - 1 ? "disabled" : ""} aria-label="Move down">&darr;</button>
+          <button type="button" data-remove="${card.entity_type}|${card.instance_key}" aria-label="Remove ${title} from dashboard" title="Remove from dashboard">&times;</button>
         </span>
       </div>
       ${bodyHtml}
@@ -946,6 +988,16 @@
     if (!data) { container.innerHTML = ""; return; }
     const sorted = [...dashboardConfig.cards].sort((a, b) => a.order - b.order);
     container.innerHTML = sorted.map((card) => renderDashboardCard(card, data)).join("");
+    // A card for an instance that is no longer on the bus (e.g. the simulator's
+    // engine 0:35 after switching to real hardware) stays visible and stale by
+    // design (Requirement 29.10), so it must be removable from the card itself:
+    // the selection panel only lists instances that are on the bus right now.
+    container.querySelectorAll("[data-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const [entityType, ...rest] = btn.dataset.remove.split("|");
+        toggleInstanceSelected(entityType, rest.join("|"), false);
+      });
+    });
     container.querySelectorAll("[data-move]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const [entityType, instanceKey, direction] = btn.dataset.move.split("|");
@@ -1040,8 +1092,125 @@
     }
   }
 
+  // --- Fuel endurance panel + owner-set tank sizes ---------------------------
+  // The server derives remaining/endurance/range (data.fuel) and says how; this
+  // only formats them. Any missing input shows a dash and a plain reason.
+  function formatHoursMinutes(hours) {
+    const total = Math.round(hours * 60);
+    return Math.floor(total / 60) + " h " + String(total % 60).padStart(2, "0") + " min";
+  }
+
+  function renderFuel(fuel) {
+    const figures = document.getElementById("fuel-figures");
+    const note = document.getElementById("fuel-note");
+    const ageMs = fuel && fuel.oldest_input_updated_at
+      ? (Date.now() / 1000 - fuel.oldest_input_updated_at) * 1000 : Infinity;
+    const live = fuel && ageMs <= ENTITY_NO_DATA_AFTER_MS;
+    const rows = [
+      ["endurance", live && fuel.endurance_h !== null ? formatHoursMinutes(fuel.endurance_h) : null],
+      ["range", live && fuel.range_nm !== null ? fuel.range_nm.toFixed(0) + '<span class="unit">nm</span>' : null],
+      ["fuel remaining", live && fuel.remaining_litres !== null
+        ? formatValue("quantity_remaining_litres", displayValueFor("quantity_remaining_litres", fuel.remaining_litres))
+          + '<span class="unit">' + unitLabelFor("quantity_remaining_litres") + "</span>" : null],
+      ["fuel burn", live && fuel.burn_lph !== null
+        ? formatValue("fuel_rate", displayValueFor("fuel_rate", fuel.burn_lph))
+          + '<span class="unit">' + unitLabelFor("fuel_rate") + "</span>" : null],
+    ];
+    figures.innerHTML = rows.map(([label, value]) =>
+      `<div class="metric-row"><span class="metric-label">${label}</span>` +
+      (value === null ? '<span class="metric-value is-unset">&mdash;</span>' : `<span class="metric-value">${value}</span>`) +
+      "</div>").join("");
+
+    let message;
+    if (!live) message = "No fuel data yet.";
+    else if (fuel.needs_capacity.length) message = 'Enter your fuel tank size in <a href="#settings-panel">Boat settings</a> to see endurance and range.';
+    else if (fuel.remaining_litres === null) message = "Waiting for a fuel tank reading.";
+    else if (fuel.burn_lph === null) message = "Waiting for engine fuel rate.";
+    else if (fuel.burn_lph === 0) message = "Engine is not burning fuel, so there is no endurance figure.";
+    else if (fuel.range_nm === null) message = "Range needs a speed over ground reading.";
+    else message = "All fuel tanks divided by all engines' burn, at current speed.";
+    note.innerHTML = message;
+    note.title = fuel ? fuel.derivation : "";
+  }
+
+  let configuredCapacities = {};
+  let settingRowsKey = null;
+
+  function renderTankSettings(tanks) {
+    const fuelKeys = Object.keys(tanks || {}).filter((k) => tanks[k].fluid_type === 0).sort();
+    const signature = fuelKeys.join(",");
+    if (signature === settingRowsKey) return; // never rebuild while the user is typing
+    settingRowsKey = signature;
+    const holder = document.getElementById("tank-setting-rows");
+    holder.textContent = "";
+    if (fuelKeys.length === 0) {
+      holder.textContent = "No fuel tank seen on the bus yet.";
+      return;
+    }
+    for (const key of fuelKeys) {
+      const [instance, address] = key.split(":");
+      const row = document.createElement("label");
+      row.className = "setting-row";
+      const text = document.createElement("span");
+      text.className = "setting-label";
+      text.append("Fuel tank " + instance + " ");
+      const small = document.createElement("small");
+      small.textContent = "(address " + address + ")";
+      text.append(small);
+      const input = document.createElement("input");
+      input.type = "number"; input.inputMode = "decimal"; input.min = "1"; input.max = "20000"; input.step = "any";
+      input.dataset.tank = key;
+      input.value = configuredCapacities[key] !== undefined ? configuredCapacities[key] : "";
+      input.placeholder = tanks[key].capacity_litres ? String(tanks[key].capacity_litres) : "e.g. 200";
+      const unit = document.createElement("span");
+      unit.className = "setting-unit"; unit.textContent = "litres";
+      row.append(text, input, unit);
+      holder.append(row);
+    }
+  }
+
+  async function loadSettings() {
+    try {
+      const response = await fetch("/api/v1/settings");
+      if (!response.ok) return;
+      configuredCapacities = (await response.json()).tank_capacity_litres || {};
+      settingRowsKey = null; // rebuild rows with the saved values
+      if (latestLivePayload) renderTankSettings(latestLivePayload.tanks);
+    } catch (e) { /* settings just stay empty until the next load */ }
+  }
+
+  document.getElementById("tank-settings").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = document.getElementById("settings-status");
+    const capacities = { ...configuredCapacities }; // keep saved sizes for tanks not shown right now
+    for (const input of document.querySelectorAll("#tank-setting-rows input[data-tank]")) {
+      if (input.value.trim() === "") delete capacities[input.dataset.tank];
+      else capacities[input.dataset.tank] = Number(input.value);
+    }
+    status.className = ""; status.textContent = "Saving...";
+    try {
+      const response = await fetch("/api/v1/settings/tanks", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ capacities }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        status.className = "error";
+        status.textContent = (body.detail && body.detail.error) || "Could not save.";
+        return;
+      }
+      configuredCapacities = body.tank_capacity_litres;
+      status.textContent = "Saved";
+    } catch (e) {
+      status.className = "error"; status.textContent = "Could not reach the board.";
+    }
+  });
+  loadSettings();
+
   function renderLive(data) {
     latestLivePayload = data; // Stage 7.6: feeds the dashboard cards too (Requirement 29.8)
+    renderFuel(data.fuel);
+    renderTankSettings(data.tanks);
 
     const engineKeys = Object.keys(data.engines || {});
     if (engineKeys.length === 0) {
