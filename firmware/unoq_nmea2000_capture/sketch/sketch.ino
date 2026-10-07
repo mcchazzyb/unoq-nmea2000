@@ -58,14 +58,21 @@
 
 // --- Pin configuration -- VERIFY against your physical shield's jumpers ---
 static const byte MCP2518_CS = 10;   // P2 shunt pins 1-2 (shield factory default)
-static const byte MCP2518_INT = 2;   // P7 shunt fitted (shield default)
+// No INT pin: the controller is POLLED over SPI (see loop()). Interrupt mode
+// (INT = D2 via the P7 shunt) was tried first and delivered zero frames on the
+// real UNO Q even with P7 fitted and a live bus; polling the same controller
+// with the same settings received thousands (bench scan, 2026-10-07).
 static const byte TRANSCEIVER_SILENT_PIN = 4; // shield D4, requires P5 shunt fitted
 
 // --- CAN controller instance ---
-ACAN2517 can(MCP2518_CS, SPI, MCP2518_INT);
+ACAN2517 can(MCP2518_CS, SPI, 255); // 255 = no INT pin, polled
 
 // --- Receive buffering: MCU polls the controller, Linux polls the MCU ---
-static const uint8_t FRAME_BATCH_MAX = 16; // bounded so get_frame_batch() stays fast/non-blocking
+// Each frame is ~40 chars, so 4 frames stay under ~170 chars. The RouterBridge RPC
+// layer uses small fixed buffers (request buffer 256 B, bridge thread stack ~500 B);
+// the old 16-frame batches (~600 chars) coincided with the MCU going unresponsive
+// on real bus traffic (bench 2026-10-07). Keep this small; poll the Bridge faster instead.
+static const uint8_t FRAME_BATCH_MAX = 4;
 struct BufferedFrame {
   uint32_t id;
   bool ext;
@@ -173,13 +180,15 @@ void setup() {
 
   SPI.begin();
 
-  // 20 MHz oscillator is the MCP2518FD shield's typical crystal; VERIFY
-  // against your board's actual oscillator if begin() reports a bit-rate
-  // error (Requirement 24.2: must land on exactly 250 kbit/s).
-  ACAN2517Settings settings(ACAN2517Settings::OSC_20MHz, 250UL * 1000UL);
+  // The shield's MCP2518FD runs from a 40 MHz oscillator (per the board's
+  // documents, confirmed by the owner 2026-10-07; a bench scan at 250 kbit/s
+  // with this setting received the Pi's frames). This was 20 MHz before, an
+  // unverified guess: begin() succeeds either way (it only proves SPI works).
+  // (Requirement 24.2: must land on exactly 250 kbit/s).
+  ACAN2517Settings settings(ACAN2517Settings::OSC_40MHz, 250UL * 1000UL);
   settings.mRequestedMode = ACAN2517Settings::ListenOnly; // Requirement 1.2, 24.3
 
-  const uint32_t errorCode = can.begin(settings, [] { can.isr(); });
+  const uint32_t errorCode = can.begin(settings, NULL); // NULL ISR: polled mode
   canInitOk = (errorCode == 0);
 
   if (canInitOk) {
@@ -204,6 +213,12 @@ void loop() {
   // Drain the controller's receive FIFO into our ring buffer as fast as
   // possible; Linux polls get_frame_batch() separately via Bridge. No
   // delay() anywhere in this path (Bridge handlers must stay non-blocking).
+  // Service the controller over SPI (no interrupt in use). NOT can.poll():
+  // that disables interrupts until the controller is empty, which never ends
+  // on a saturated bus (e.g. one un-ACKed frame retried back to back) and
+  // starves the Bridge UART. A bounded number of passes per loop keeps the
+  // Bridge responsive; frames wait in the controller FIFO meanwhile.
+  for (uint8_t pass = 0; pass < 4 && can.isr_core(); pass++) {}
   CANMessage message;
   while (can.receive(message)) {
     uint16_t nextHead = (uint16_t)((ringHead + 1) % RING_SIZE);
