@@ -22,12 +22,34 @@ receive-only is structural, not a configuration option.
 
 ## Status
 
-Host-testable MVP in progress. See
+The host-testable stack is complete and the Arduino UNO Q is now receiving real
+frames on a bench CAN bus (a Raspberry Pi generating traffic), with engine, tank,
+battery and navigation data on the web dashboard. See
 [.kiro/specs/nmea2000-diagnostic-platform/tasks.md](.kiro/specs/nmea2000-diagnostic-platform/tasks.md)
-for the current stage. Hardware (Arduino UNO Q + CAN shield) stages begin
-only after the full host-testable Stage 8 gate passes — everything up to
-that point runs on a laptop with no CAN hardware, using the built-in
-simulator and golden fixture replay.
+for the open Stage 10 items.
+
+Not yet done:
+
+- **Boat trial.** Everything so far is bench-only.
+- **Intermittent Bridge stall** under sustained traffic. The app must be
+  restarted to recover; there is no self-recovery in the product yet. See
+  [docs/hardware.md](docs/hardware.md).
+- **Phone access away from home WiFi** is configured but untested
+  ([docs/network-access.md](docs/network-access.md)).
+- **Bluetooth** is read-only and binary; a human-readable readings
+  characteristic is proposed, not built.
+
+## The dashboard
+
+The page is called **NMEA2000 Dashboard** and is designed for a phone first.
+
+- Engine, tank, electrical and navigation cards; speed over ground and wind
+  shown in knots, RPM and tank level as whole numbers, tank type by name.
+- **Fuel endurance:** remaining fuel, endurance and range are derived values,
+  marked as derived, and are null unless every input is known. Tank sizes are
+  set in the Boat settings panel and kept in `settings.json` in the capture
+  directory.
+- A × button removes a stale card.
 
 ## Quick start (host-testable, no hardware required)
 
@@ -59,6 +81,10 @@ make replay FILE=fixtures/golden/engine_rpm_change.jsonl
 - [docs/nmea-discovery.md](nmea-discovery.md) — node discovery, NodeKey
   identity, and the diagnostic PGN classifier
 - [docs/tank-data.md](tank-data.md) — fuel/tank level decoding
+- [docs/hardware.md](docs/hardware.md) — UNO Q build, bench testing, the
+  bench-only ACK mode, known issues
+- [docs/network-access.md](docs/network-access.md) — reaching the dashboard
+  from a phone (WiFi profiles, hotspot fallback, Bluetooth)
 - [docs/testing.md](testing.md) — test suite layout, coverage gates, running
   tests
 - [docs/security.md](security.md) — receive-only enforcement, threat model,
@@ -74,7 +100,12 @@ protocol/    Layer 2 — pure Domain_Model, decoders, parsing. No hardware/
 service/     Ingestion pipeline, persistence, discovery, correlation.
 ble/         BLE wire format + MockBLEPublisher (Stage 10 adds the real
              BlueZ-backed publisher behind the same Protocol).
-web/         FastAPI Web_API + the single-page Web_UI.
+web/         FastAPI Web_API + the single-page Web_UI (fuel.py and
+             settings.py hold the derived fuel values and tank sizes).
+firmware/    The UNO Q App Lab app: MCU sketch, Bridge client, a synced
+             copy of web/.
+bench/       Bench-only test aids (ACK sketch). Never part of the boat image.
+deploy/      systemd unit for the BLE publisher on the board.
 simulator/   Synthetic traffic generator and fixture replay (ICanReceiver).
 fixtures/    Golden fixture library (recorded/synthetic captures + their
              documented pass/fail assertions).
