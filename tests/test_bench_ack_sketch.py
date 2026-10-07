@@ -30,3 +30,27 @@ def test_production_sketch_has_no_ack_mode():
     assert "Normal20B ?" not in PROD and "BENCH" not in PROD
     assert "mRequestedMode = ACAN2517Settings::ListenOnly" in PROD
     assert "digitalWrite(TRANSCEIVER_SILENT_PIN, LOW)" not in PROD
+
+
+def test_bench_build_differs_from_production_only_in_fenced_lines():
+    """One source of truth: everything outside the fenced bench lines must be
+    byte-identical to the production sketch, so what is tested on the bench is
+    what ships, while the boat image contains NO ACK code at all."""
+    import difflib
+
+    prod, bench = PROD.splitlines(), BENCH.splitlines()
+    start = bench.index(prod[0])
+    assert any("#ifndef BENCH_ONLY_ACK" in line for line in bench[:start])
+    added, removed = [], []
+    for line in difflib.unified_diff(prod, bench[start:], lineterm="", n=0):
+        if line.startswith(("+++", "---", "@@")):
+            continue
+        (added if line[0] == "+" else removed).append(line[1:])
+    # only two production lines may be replaced by their bench counterparts
+    assert len(removed) == 2
+    assert any("silent mode engaged" in line for line in removed)
+    assert any("mRequestedMode = ACAN2517Settings::ListenOnly" in line for line in removed)
+    allowed = ("BENCH", "benchAck", "delay(5);")
+    for line in added:
+        assert line.strip() == "" or line.strip().startswith("//") or any(a in line for a in allowed), line
+        assert "send" not in line.lower() and "transmit" not in line.lower().replace("transceiver", "")
