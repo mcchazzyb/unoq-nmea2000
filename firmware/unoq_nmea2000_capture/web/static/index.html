@@ -612,8 +612,15 @@
     el.textContent = state === "online" ? "live" : state;
   }
 
+  // PGN 127505 tank type codes. Anything else is shown as "Type N" rather than guessed.
+  const FLUID_TYPE_NAMES = { 0: "Fuel", 1: "Fresh water", 2: "Grey water", 3: "Live well", 4: "Oil", 5: "Black water" };
+  // Readings where decimals are noise on a cockpit display.
+  const WHOLE_NUMBER_KEYS = new Set(["rpm", "level_percent"]);
+
   function formatValue(key, value) {
     if (typeof value === "number") {
+      if (key === "fluid_type") return FLUID_TYPE_NAMES[value] || "Type " + value;
+      if (WHOLE_NUMBER_KEYS.has(key)) return Math.round(value).toLocaleString();
       if (Number.isInteger(value)) return value.toLocaleString();
       return value.toFixed(2);
     }
