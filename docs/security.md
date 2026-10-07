@@ -24,6 +24,15 @@ barriers (a separate approved spec, a compile-time flag, a runtime flag,
 and an explicit user action) that are explicitly out of scope for this
 project.
 
+**Known limit (measured 2026-10-03):** the transceiver's silent pin (D4) is held
+HIGH by firmware only. Before the sketch starts (power-up, MCU reset, app stopped)
+D4 reads about 0 V, so silent mode is not a hardware default. Accepted by the
+owner: no code path exists that can send a frame, and the CAN controller is not
+configured until the sketch starts, so nothing transmits in that window. In situ the
+board is wired to the Backbone at power-on, so this window occurs on every boot (Linux
+boot plus app start; length not yet measured). A 10k pull-up from D4 to 3.3 V would
+close it in hardware if that reasoning is ever not enough.
+
 ## Local-only operation (Requirement 14.3, 14.9, 15.6)
 
 - The Web_API binds to loopback and configured local interfaces only —

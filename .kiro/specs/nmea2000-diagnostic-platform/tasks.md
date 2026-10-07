@@ -668,7 +668,7 @@ properties (Properties 1-39 in design.md) it proves.
     Board remained bench-isolated (no Backbone connection) throughout, consistent with 9.2
     still being open below.
 
-- [~] 9.2 Stage Gate — bench validation of the silent-mode fail-safe (before any Backbone
+- [x] 9.2 Stage Gate — bench validation of the silent-mode fail-safe (before any Backbone
       connection)
   - On the bench, measure and validate that the silent-mode control line (shield D4 with
     the P5 shunt fitted) holds the transceiver transmit channel non-driving throughout MCU
@@ -699,6 +699,31 @@ properties (Properties 1-39 in design.md) it proves.
     use min/max hold if the meter has it), (2) MCU reset (press reset, watch for any
     excursion away from the silent level), (3) steady state after sketch startup. Pass =
     the line stays at the silent level in all three. Write the readings into the
+  - **Measured 2026-10-03 (AstroAI AM33D, DC V, red on shield D4, black on GND, P5 fitted,
+    CAN-H/L unconnected).** Source read: CN0401 shield guide (D4 HIGH = silent; transceiver
+    works normally with P5 removed). ADM3055E datasheet SILENT-pin default NOT retrieved.
+    - Steady state, sketch running: 3.30-3.31 V (HIGH = silent). PASS.
+    - App stopped, sketch not running: 0.08 V. FAIL (nothing holds D4 high).
+    - MCU reset (white button): D4 fell to 0 V and stayed there; app went `failed` and did
+      not recover until restarted by hand. FAIL.
+    - Cold power-up: MCU waits for `arduino-app-cli` to load the default app's sketch
+      (Arduino forum "Time to start sketch"), so D4 is low until the app starts. FAIL as
+      a hardware default.
+    - **Conclusion:** silent-mode pin is firmware-only; 24.9 is NOT met. The CAN controller
+      is still listen-only once the sketch runs and nothing transmits while it is stopped,
+      but the gate requires a hardware default. **Gate stays open.**
+    - **Fix to do:** pull-up from D4 (P5 pin) to 3.3 V (~10 k), then re-measure all three
+      phases. Read the ADM3055E datasheet SILENT pin (internal pull-down?) before choosing
+      the value. Multimeter cannot see glitches shorter than its sample rate; note in guide.
+    - **DECISION 2026-10-03 (owner): no pull-up. Software-only silent mode is accepted.**
+      Rationale: the platform is receive-only and no transmit code path exists (Req 1,
+      Property 28), so a low D4 cannot cause a frame to be sent. Gate closed as an
+      accepted deviation from 24.9; limit documented in docs/security.md. NOTE: a "connect CAN
+      only after the app is running" procedure is NOT feasible in situ (board is wired to the
+      Backbone and powers up with it), so the low-D4 window occurs on every boot; acceptance
+      rests on there being no transmit path. Pull-up remains an optional later hardening.
+    - Autostart added: `arduino-app-cli properties set default` for the app, and
+      `deploy/unoq-ble-publisher.service` for BLE. Both confirmed after a reboot.
     Hardware_Setup_Guide (24.9). Only after that may CAN-H/CAN-L touch a live Backbone.
   - _Validates: 1.2, 1.3, 1.5, 1.6, 24.2-24.9_
 

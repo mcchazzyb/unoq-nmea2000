@@ -1,0 +1,23 @@
+# BlueZ GATT publisher for the UNO Q host OS (Stage 10.3, Requirement 13).
+# Install on the board:
+#   sudo cp unoq-ble-publisher.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now unoq-ble-publisher
+#
+# Runs as root: that is the configuration verified against a real iPhone
+# (bonded, encrypted reads). It talks to the containerised Web_API over
+# loopback, so it only needs the App Lab default app to be up; Restart=always
+# covers the window where the app is still starting.
+[Unit]
+Description=unoq-nmea2000 BLE publisher (BlueZ GATT)
+After=bluetooth.service network.target
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/arduino/unoq-nmea2000
+ExecStart=/usr/bin/python3 -m ble.bluez_publisher --web-api http://127.0.0.1:8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
