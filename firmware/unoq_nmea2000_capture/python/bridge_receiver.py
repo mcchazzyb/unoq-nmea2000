@@ -33,6 +33,7 @@ genuinely proven live (CAN connected=True mode=ListenOnly on real silicon).
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from dataclasses import dataclass
 
@@ -50,6 +51,17 @@ from arduino.app_utils import App, Bridge  # type: ignore[import-not-found]
 sys.path.insert(0, "/app")
 from protocol.identifier import MalformedIdentifierError, parse_identifier  # noqa: E402
 from protocol.receiver import CanFrame, CanHealth  # noqa: E402
+
+
+# frames() (ingestion thread) and health() (health-poll thread) share one Bridge
+# client. Overlapping calls on it can interleave on the router socket and leave the
+# MCU's Bridge waiting on a half-sent request, so every call goes through one lock.
+_BRIDGE_LOCK = threading.Lock()
+
+
+def _bridge_call(method: str):
+    with _BRIDGE_LOCK:
+        return Bridge.call(method)
 
 
 POLL_INTERVAL_S = 0.02  # 20ms -- comfortably faster than NMEA 2000's typical frame spacing
@@ -135,7 +147,7 @@ class ArduinoBridgeCanReceiver:
 
     def _check_can_init_once(self) -> bool:
         if self._can_init_ok is None:
-            self._can_init_ok = bool(Bridge.call("get_can_init_ok"))
+            self._can_init_ok = bool(_bridge_call("get_can_init_ok"))
         return self._can_init_ok
 
     def frames(self):
@@ -144,7 +156,7 @@ class ArduinoBridgeCanReceiver:
         from the MCU is skipped, never raised (fail-safe, steering 11)."""
         self._check_can_init_once()
         while True:
-            batch = Bridge.call("get_frame_batch")
+            batch = _bridge_call("get_frame_batch")
             if batch:
                 for line in batch.split("\n"):
                     if not line:
@@ -160,7 +172,7 @@ class ArduinoBridgeCanReceiver:
         call fails or returns a malformed line, rather than raising --
         serving stale health is better than crashing the health endpoint
         (consistent with steering 11's fail-safe/capture-first intent)."""
-        raw = Bridge.call("get_health")
+        raw = _bridge_call("get_health")
         parsed = _parse_health_line(raw) if raw else None
         if parsed is not None:
             self._last_health = parsed
