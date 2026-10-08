@@ -31,9 +31,12 @@ for the open Stage 10 items.
 Not yet done:
 
 - **Boat trial.** Everything so far is bench-only.
-- **Intermittent Bridge stall** under sustained traffic. The app must be
-  restarted to recover; there is no self-recovery in the product yet. See
-  [docs/hardware.md](docs/hardware.md).
+- **Intermittent Bridge stall** under sustained bench traffic (53 stalls in
+  10.4 h, median about 9 minutes). The app must be restarted to recover; there
+  is no self-recovery in the product yet. See [docs/hardware.md](docs/hardware.md).
+- **Boat preflight:** `scripts/boat_preflight.sh arduino@<board>` checks that the
+  board runs the production build. The current hand-off state is in
+  `.kiro/steering/16-current-state-and-next-steps.md`.
 - **Phone access away from home WiFi** is configured but untested
   ([docs/network-access.md](docs/network-access.md)).
 - **Bluetooth** is read-only and binary; a human-readable readings

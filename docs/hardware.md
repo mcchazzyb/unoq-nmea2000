@@ -68,14 +68,27 @@ Under sustained CAN traffic the Bridge occasionally stops answering
 (`get_health` times out) after roughly 30 to 110 s, in about a third of 130 s
 bench trials. The MCU is not dead; restarting the app recovers it.
 
+- **Overnight soak (2026-10-07/08, bench ACK sketch, Pi looping a synthetic
+  scenario): 53 stalls in 10.4 h.** Time running before a stall: minimum 121 s,
+  median 529 s, mean 681 s, maximum 2612 s (16 under 5 min, 21 between 5 and
+  15 min, 16 over 15 min). Recovery by restarting the app took about 100 s.
 - Ruled out as the sole cause: batch size, loop yielding, Python thread
   overlap, health-poll rate.
-- Four of four trials with empty batches (frames received, none returned over
-  the Bridge) survived, which points at the frame-return path. A compact
-  frame encoding is the leading candidate fix.
-- **The production image has no self-recovery yet.** Overnight bench soaks use
-  an external watchdog (`~/soak_watch.sh` on the board) that logs each stall and
-  restarts the app. That script is a test aid, not part of the product.
+- Four of four 130 s trials with empty batches (frames received, none returned
+  over the Bridge) survived. That is **not** evidence about the frame-return
+  path: 130 s is shorter than the median time to a stall, so a third of runs
+  would survive by chance. A longer empty-batch soak would be needed.
+- Untested candidate fixes: compact frame encoding, `provide()` instead of
+  `provide_safe()`, a newer RouterBridge (installed 0.4.3), an MCU-side
+  self-reset.
+- **The production image has no self-recovery yet.** The container is started
+  with `restart=no`, so recovery has to come from outside it. A recovery
+  watchdog should key on the Bridge call failing, not on engine data age: a
+  quiet bus is legitimate and must not cause a restart. The bench watchdog
+  (`soak_watch.sh`, since removed from the board) keyed on engine age and was a
+  test aid only.
+- Real boat traffic, with real ACKing nodes, may behave differently. Record the
+  first boat session either way.
 
 ## Disk use
 
