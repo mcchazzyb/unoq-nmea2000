@@ -267,6 +267,8 @@ class _Characteristic:
             return json.dumps(self._publisher.read_connection_health()).encode("utf-8")
         if name == "diagnostics":
             return json.dumps(self._publisher.read_diagnostics()).encode("utf-8")
+        # readings_text / live_* fall through to read_characteristic, which returns the
+        # value publish() last cached (text for readings_text, binary envelope for live_*).
         value = self._publisher.read_characteristic(name)
         return value if value is not None else b""
 

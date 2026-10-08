@@ -25,6 +25,13 @@ publisher implementing the same Protocol is Stage 10 hardware work.
 | A2D7 | `live_navigation` | NOTIFY |
 | A2D8 | `alerts_status` | READ_NOTIFY |
 | A2D9 | `diagnostics` | READ |
+| A2DA | `readings_text` | READ_NOTIFY |
+
+`readings_text` is a **human-readable UTF-8 line** for a generic scanner (LightBlue,
+nRF Connect) — the `live_*` characteristics above are the compact binary envelope and show
+as hex. Example: `RPM 2664 | Fuel 99% | Batt 12.6V | SOG 5.2kn | Wind 12.1kn`. SOG and wind
+in knots, RPM and tank level whole, fluid type by name, UNSET fields omitted; `STALE | …`
+(or `STALE (no data)`) when the bus has gone quiet. Read-only like the rest (Property 23).
 
 UUIDs are documented placeholders under a base 128-bit vendor UUID, per
 design.md — not yet registered.

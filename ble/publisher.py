@@ -19,6 +19,7 @@ from enum import Enum
 from typing import Protocol
 
 from ble.encoding import SCHEMA_VERSION, encode_envelope
+from ble.readings_text import format_readings_bytes
 from protocol.domain import ElectricalState, EngineState, NavigationState, TankState, VesselState
 from protocol.receiver import CanHealth
 
@@ -63,6 +64,9 @@ GATT_SCHEMA: tuple[Characteristic, ...] = (
     Characteristic("A2D7", "live_navigation", CharacteristicProperty.NOTIFY),
     Characteristic("A2D8", "alerts_status", CharacteristicProperty.READ_NOTIFY),
     Characteristic("A2D9", "diagnostics", CharacteristicProperty.READ),
+    # Human-readable one-line summary for a generic scanner (LightBlue). The live_* above are
+    # binary; this one is UTF-8 text so the owner needs no custom app.
+    Characteristic("A2DA", "readings_text", CharacteristicProperty.READ_NOTIFY),
 )
 
 
@@ -227,6 +231,14 @@ class MockBLEPublisher:
             # publish() itself is called.
             if (now - state.last_notified_at) >= MIN_NOTIFY_INTERVAL_S:
                 state.last_notified_at = now
+
+        # The plain-text summary reflects the whole vessel and the stale flag, not one
+        # entity group, so it is always refreshed (even when every group is empty, to show
+        # "(no data yet)" / "STALE (no data)").
+        text_state = self._states["readings_text"]
+        text_state.last_value = format_readings_bytes(vessel, self.is_stale(now))
+        if (now - text_state.last_notified_at) >= MIN_NOTIFY_INTERVAL_S:
+            text_state.last_notified_at = now
 
     def read_characteristic(self, name: str, client_id: str | None = None) -> bytes | None:
         """Vessel-data characteristic reads/notification values require

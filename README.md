@@ -39,8 +39,9 @@ Not yet done:
   `.kiro/steering/16-current-state-and-next-steps.md`.
 - **Phone access away from home WiFi** is configured but untested
   ([docs/network-access.md](docs/network-access.md)).
-- **Bluetooth** is read-only and binary; a human-readable readings
-  characteristic is proposed, not built.
+- **Bluetooth** is read-only. The live characteristics are binary; a `readings_text`
+  characteristic shows a plain-text summary a generic scanner (LightBlue) can read.
+  Not yet tested over the air with real bus traffic.
 
 ## The dashboard
 
