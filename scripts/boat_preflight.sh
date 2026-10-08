@@ -19,6 +19,8 @@ health=$(ssh -o BatchMode=yes "$HOST" "docker exec unoq_nmea2000_capture-main-1 
 echo "      MCU health: $health"
 check "MCU is ListenOnly with the silent pin high" "echo '$health' | grep -qE ',ListenOnly,[a-z]+,true,'"
 check "dashboard answers" "ssh -o BatchMode=yes $HOST 'curl -sf -m5 http://127.0.0.1:8000/api/v1/health >/dev/null'"
-check "no bench soak watchdog left running" "! ssh -o BatchMode=yes $HOST 'ps -eo cmd | grep -q "[s]oak_watch"'"
+check "MCU recovery service is active (resets the MCU if the Bridge wedges)" "ssh -o BatchMode=yes $HOST 'systemctl is-active --quiet unoq-mcu-recover'"
+check "dashboard reports the Bridge answering (receiver_ok_age_s)" "ssh -o BatchMode=yes $HOST 'curl -sf -m5 http://127.0.0.1:8000/api/v1/health | grep -Eq receiver_ok_age_s.:[0-9]'"
+check "no bench soak script left running" "! ssh -o BatchMode=yes $HOST 'ps -eo cmd | grep -Eq \"[s]oak_(watch|obs)\"'"
 echo "MANUAL: D6 jumper removed? CAN wiring/terminators checked? Power via a fused, surge-protected feed?"
 exit $fail

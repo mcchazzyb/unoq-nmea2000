@@ -1,0 +1,19 @@
+# Resets the UNO Q's MCU when its Bridge stops answering (see deploy/unoq_mcu_recover.py).
+# Install on the board:
+#   (the repo is checked out at /home/arduino/unoq-nmea2000, as for the BLE publisher)
+#   sudo systemctl enable --now /home/arduino/unoq-nmea2000/deploy/unoq-mcu-recover.service
+#
+# Runs as root because the debug-port reset needs /dev/gpiochip1. It only ever talks to the
+# dashboard on loopback and to the MCU's debug port; it transmits nothing on the CAN bus.
+[Unit]
+Description=unoq-nmea2000 MCU recovery (reset the MCU when the Bridge wedges)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/arduino/unoq-nmea2000/deploy/unoq_mcu_recover.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

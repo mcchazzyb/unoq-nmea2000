@@ -269,6 +269,7 @@ def _health_poll_loop(receiver: ICanReceiver, cache: LiveStateCache, stop: threa
             if cache.vessel.health is None:
                 cache.vessel.health = DeviceHealth()
             cache.vessel.health.can_health = receiver.health()
+            cache.note_receiver_ok()
         except Exception:  # noqa: BLE001 - deliberate: health polling must never crash the process
             logger.exception("Live_Ingestion_Runtime: health poll raised; retrying")
         stop.wait(_HEALTH_POLL_INTERVAL_S)

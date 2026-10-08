@@ -31,9 +31,9 @@ for the open Stage 10 items.
 Not yet done:
 
 - **Boat trial.** Everything so far is bench-only.
-- **Intermittent Bridge stall** under sustained bench traffic (53 stalls in
-  10.4 h, median about 9 minutes). The app must be restarted to recover; there
-  is no self-recovery in the product yet. See [docs/hardware.md](docs/hardware.md).
+- **Bridge stall:** the MCU's Bridge can wedge under sustained traffic (53 times in 10.4 h on the
+  bench). A host service resets the MCU and the dashboard recovers in about 20 s with no app restart;
+  the underlying cause (lost serial bytes) is not found. See [docs/hardware.md](docs/hardware.md).
 - **Boat preflight:** `scripts/boat_preflight.sh arduino@<board>` checks that the
   board runs the production build. The current hand-off state is in
   `.kiro/steering/16-current-state-and-next-steps.md`.

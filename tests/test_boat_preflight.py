@@ -24,6 +24,11 @@ def test_script_compares_board_sketch_to_production_and_requires_listen_only():
     assert "BENCH_ONLY_ACK" in s
 
 
+def test_script_checks_the_recovery_service_and_bridge_liveness():
+    s = SCRIPT.read_text()
+    assert "unoq-mcu-recover" in s and "receiver_ok_age_s" in s
+
+
 def test_script_is_read_only():
     s = SCRIPT.read_text()
     assert not re.search(r"\b(scp|rm|kill|app (start|stop|restart)|nmcli connection (add|modify|up|down))\b", s)

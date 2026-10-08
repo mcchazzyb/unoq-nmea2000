@@ -32,6 +32,7 @@ genuinely proven live (CAN connected=True mode=ListenOnly on real silicon).
 """
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 import time
@@ -52,6 +53,8 @@ sys.path.insert(0, "/app")
 from protocol.identifier import MalformedIdentifierError, parse_identifier  # noqa: E402
 from protocol.receiver import CanFrame, CanHealth  # noqa: E402
 
+
+logger = logging.getLogger(__name__)
 
 # frames() (ingestion thread) and health() (health-poll thread) share one Bridge
 # client. Overlapping calls on it can interleave on the router socket and leave the
@@ -77,6 +80,7 @@ class _ParsedHealth:
     termination_off: bool
     silent_pin_high: bool
     error_counters: int
+    uptime_ms: int | None = None  # absent from older sketches
 
 
 def _parse_frame_line(line: str) -> CanFrame | None:
@@ -130,6 +134,7 @@ def _parse_health_line(line: str) -> _ParsedHealth | None:
             termination_off=parts[4] == "true",
             silent_pin_high=parts[5] == "true",
             error_counters=int(parts[6]),
+            uptime_ms=int(parts[7]) if len(parts) > 7 else None,
         )
     except (ValueError, IndexError):
         return None
@@ -143,6 +148,9 @@ class ArduinoBridgeCanReceiver:
 
     def __init__(self) -> None:
         self._last_health: _ParsedHealth | None = None
+        # Number of times the MCU was seen to restart (its uptime went backwards).
+        # The sketch resets itself when its Bridge wedges; this makes that visible.
+        self.mcu_restarts = 0
         self._can_init_ok: bool | None = None
 
     def _check_can_init_once(self) -> bool:
@@ -166,6 +174,18 @@ class ArduinoBridgeCanReceiver:
                         yield frame
             time.sleep(POLL_INTERVAL_S)
 
+    def _note_restart(self, parsed: _ParsedHealth) -> None:
+        prev = self._last_health
+        if prev is None or prev.uptime_ms is None or parsed.uptime_ms is None:
+            return
+        if parsed.uptime_ms < prev.uptime_ms:
+            self.mcu_restarts += 1
+            logger.warning(
+                "MCU restarted (uptime %d ms -> %d ms); restart #%d since the app started. "
+                "The sketch resets itself when its Bridge stops answering.",
+                prev.uptime_ms, parsed.uptime_ms, self.mcu_restarts,
+            )
+
     def health(self) -> CanHealth:
         """Requirement 24.5: health metrics exposed over the Bridge. Returns
         the LAST successfully parsed health snapshot if the current Bridge
@@ -175,6 +195,7 @@ class ArduinoBridgeCanReceiver:
         raw = _bridge_call("get_health")
         parsed = _parse_health_line(raw) if raw else None
         if parsed is not None:
+            self._note_restart(parsed)
             self._last_health = parsed
         h = self._last_health
         # CanHealth.termination_on MUST be False in the MVP (Requirement 1.5,

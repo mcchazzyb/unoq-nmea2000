@@ -15,8 +15,13 @@ live, auto-generated reference, not a replacement for it.
 ### `GET /api/v1/health`
 
 ```json
-{"status": "ok", "can_connected": true, "capture_halted": false, "device_info": {}}
+{"status": "ok", "can_connected": true, "capture_halted": false, "receiver_ok_age_s": 0.4, "device_info": {}}
 ```
+
+`receiver_ok_age_s` is the seconds since the receiver (on the UNO Q, the Bridge to the MCU)
+last answered a health call, or `null` before it first does. It keeps advancing normally on a
+quiet bus and only grows when the Bridge stops answering, so it is the signal
+`deploy/unoq_mcu_recover.py` uses to decide the MCU needs a reset.
 
 ### `GET /api/v1/live`
 

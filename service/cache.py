@@ -36,6 +36,17 @@ class LiveStateCache:
     vessel: VesselState = field(default_factory=VesselState)
     _halted_stale: bool = False
     _last_update_at: float = 0.0
+    # Monotonic time of the last receiver.health() that succeeded. For a hardware
+    # receiver that call crosses the Bridge, so this is the Bridge's liveness: it keeps
+    # advancing on a quiet bus, and stops when the Bridge wedges (unlike data age).
+    _receiver_ok_at: float | None = None
+
+    def note_receiver_ok(self) -> None:
+        self._receiver_ok_at = time.monotonic()
+
+    def receiver_ok_age_s(self) -> float | None:
+        """Seconds since the receiver last answered; None if it never has."""
+        return None if self._receiver_ok_at is None else round(time.monotonic() - self._receiver_ok_at, 1)
 
     def update(self, result: DecodeResult) -> None:
         """Apply one decoded entity to the cache, keyed per the entity's own

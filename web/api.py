@@ -145,6 +145,8 @@ def create_app(
             if cache.vessel.health and cache.vessel.health.can_health
             else False,
             "capture_halted": cache.is_stale(),
+            # Seconds since the receiver (the Bridge, on hardware) last answered; null until it first does.
+            "receiver_ok_age_s": cache.receiver_ok_age_s(),
             "device_info": device_info,
         }
 

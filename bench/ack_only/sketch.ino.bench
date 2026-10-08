@@ -66,7 +66,7 @@
  *                         size per call -- see FRAME_BATCH_MAX).
  *   get_health()       -> one line: "total_frames,dropped_frames,
  *                         queue_depth,controller_mode,termination_off,
- *                         silent_pin_high,error_counters" (Requirement 24.5;
+ *                         silent_pin_high,error_counters,uptime_ms" (Requirement 24.5;
  *                         uptime is derived on the Linux side from Bridge
  *                         call latency/process start, not duplicated here).
  *   get_can_init_ok()  -> bool: whether can.begin() succeeded at setup().
@@ -111,6 +111,13 @@ static volatile uint16_t ringTail = 0; // next unread position
 static volatile uint32_t totalFrameCount = 0;
 static volatile uint32_t droppedFrameCount = 0; // ring overflow -- oldest-dropped, newest-kept
 static bool canInitOk = false;
+
+// NO self-reset here, deliberately. After ANY reset the UNO Q's base firmware waits for the
+// host debug probe to write a non-zero value to 0x40036400 before it loads this sketch, so a
+// sketch that resets itself is never started again. Recovery from a wedged Bridge is done by the
+// host (deploy/unoq_mcu_recover.py), which repeats the platform's own reset-and-handshake.
+// get_health() reports uptime_ms so the Linux side can log each MCU restart.
+
 
 static uint16_t ringDepth() {
   return (uint16_t)((ringHead - ringTail + RING_SIZE) % RING_SIZE);
@@ -173,7 +180,7 @@ String get_frame_batch() {
 
 // Verifiable health metrics (Requirement 24.3, 24.4, 24.5), same plain-text
 // line encoding as get_frame_batch() for the same verified-round-trip reason:
-//   "total_frames,dropped_frames,queue_depth,controller_mode,termination_off,silent_pin_high,error_counters"
+//   "total_frames,dropped_frames,queue_depth,controller_mode,termination_off,silent_pin_high,error_counters,uptime_ms"
 String get_health() {
   String out;
   out += String(totalFrameCount); out += ',';
@@ -182,7 +189,8 @@ String get_health() {
   out += operationModeName(can.currentOperationMode()); out += ',';
   out += "true"; out += ','; // termination_off: hard-wired off, no runtime switch in this sketch
   out += (digitalRead(TRANSCEIVER_SILENT_PIN) == HIGH) ? "true" : "false"; out += ',';
-  out += String(can.errorCounters());
+  out += String(can.errorCounters()); out += ',';
+  out += String(millis()); // uptime_ms: the Linux side logs an MCU restart when this goes backwards
   return out;
 }
 

@@ -11,8 +11,16 @@ device is being taken to the boat. Read `docs/hardware.md` and
 
 ## State of the board right now (boat configuration)
 
+> **TEMPORARY (2026-10-08): the board is on the BENCH ACK build for the recovery soak** (D6 jumper in,
+> Pi looping traffic, `~/soak_obs.sh` logging to `~/soak.log`). `scripts/boat_preflight.sh` FAILS until it is
+> restored. To restore: `scp firmware/unoq_nmea2000_capture/sketch/sketch.ino` to the board's
+> `ArduinoApps/unoq_nmea2000_capture/sketch/`, stop the observer (`kill $(cat ~/soak_watch.pid)`),
+> `arduino-app-cli app stop` then `start user:unoq_nmea2000_capture`, remove the D6 jumper, rerun the
+> preflight, then delete this note. The text below describes the restored state.
+
 - Production sketch flashed (ListenOnly, silent pin high, 40 MHz, polled). Health line
-  `0,0,0,ListenOnly,true,true,0`. `scripts/boat_preflight.sh` passes.
+  `0,0,0,ListenOnly,true,true,0,<uptime_ms>`. `scripts/boat_preflight.sh` passes. The MCU recovery
+  service `unoq-mcu-recover` must be active (the preflight checks it).
 - App `unoq_nmea2000_capture` is the App Lab default (starts on boot), receiver =
   `hardware`. Old captures and `session.db` cleared; `settings.json` kept (holds a bench
   tank size for key `0:42`, harmless; set real tank sizes in the dashboard).
@@ -25,25 +33,26 @@ device is being taken to the boat. Read `docs/hardware.md` and
   sketch, but remove it), fit a fused, surge-rated 5 V / 3 A USB-C feed from a switched
   circuit (datasheet: USB-C is 5 V only, VIN 7 to 24 V, no surge protection on the board).
 
-## The main open problem: the Bridge stall (NOT fixed, no self-recovery)
+## The Bridge stall: mitigated by a host service, root cause still open
 
-Under sustained CAN traffic the Bridge stops answering and the dashboard goes stale until
-the app is restarted. Overnight bench soak (bench ACK sketch, Pi looping a synthetic
-scenario): **53 stalls in 10.4 h, time-to-stall min 121 s, median 529 s, max 2612 s.**
-An external watchdog restarted the app each time (about 100 s to recover).
+Under sustained CAN traffic the MCU's Bridge can wedge (bench: 53 stalls in 10.4 h, median 529 s).
+Full evidence is in `docs/hardware.md`; the short version:
 
-- The MCU itself keeps running. Ruled out as sole cause: batch size, loop delay, Python
-  thread overlap, health-poll rate. The "empty batch" test (4 of 4 survived 130 s) is NOT
-  evidence: 130 s is shorter than the median time to stall.
-- The container has `restart=no`, so an exit inside it will not bring the app back.
-  Recovery must come from outside it (a host systemd unit running
-  `arduino-app-cli app restart user:unoq_nmea2000_capture`) or from the MCU side.
-- Detect the stall from the Bridge itself (health call failing or timing out), never from
-  engine data age: a quiet bus is legitimate and must not trigger a restart.
-- Real boat traffic and real ACKing nodes may behave differently from the bench. Record
-  the first boat session honestly either way.
-- Candidate fixes, untested: compact frame encoding, `provide()` instead of
-  `provide_safe()`, newer RouterBridge (installed: 0.4.3), MCU self-reset watchdog.
+- Mechanism (read from a frozen board): the bridge thread spins in the msgpack parser at a higher
+  priority than `loop()` and no Bridge request reaches the sketch again. The UART hardware is fine and a
+  fresh Linux client fails too, so only an MCU reset clears it. Not the cause: batch size, loop delay,
+  thread overlap, poll rate, bridge-thread stack size (2048 B still stalled).
+- Fix in place: `deploy/unoq_mcu_recover.py`, a systemd service (`unoq-mcu-recover`, enabled on the
+  board). It watches `receiver_ok_age_s` on `/api/v1/health` (seconds since the app's last successful
+  Bridge call; a quiet bus does not move it) and resets the MCU when it exceeds 15 s. 3 of 3 natural
+  stalls recovered in about 20 s with no app restart. The app logs `MCU restarted (...)` each time.
+- **Do not make the sketch reset itself.** After any reset the base firmware's loader waits for the host
+  to write a non-zero value to `0x40036400` before it starts the sketch; a sketch-side reset leaves the MCU
+  dead until the host does that. A test forbids it.
+- Still unknown: why serial bytes are lost (the decoder buffer shows fragments with bytes missing).
+  Lead: `ACAN2517` wraps SPI transfers in `noInterrupts()`; check whether that starves the UART FIFO.
+- On the boat: note how often `MCU restarted` appears in the app log. Real traffic with real ACKing
+  nodes may behave differently from the bench.
 
 ## Next steps, in order
 
@@ -51,7 +60,8 @@ An external watchdog restarted the app each time (about 100 s to recover).
    `arduino@10.42.0.1` on BoatFi), connect to the bus, note whether and when the stall
    happens, save the first real capture (`scripts/promote_capture.py`). A real capture is
    the independent reference for checking the decoders against canboat.
-2. Build stall self-recovery (host-side watchdog keyed on Bridge failure) and re-soak.
+2. Find why serial bytes are lost (see the stall section); the recovery service is the safety net,
+   not the fix. Optionally measure the real-bus stall rate on the boat first.
 3. Phone access: test BoatFi and the iPhone hotspot away from home; check the Docker
    subnet 172.20.0.0/16 against the iPhone hotspot range. Then a BLE plain-text readings
    characteristic (LightBlue can show it); the live BLE characteristics are binary and
