@@ -3,20 +3,13 @@ title: Current state and next steps (hand-off snapshot)
 inclusion: always
 ---
 
-# Where the project stands (snapshot 2026-10-08, update when it changes)
+# Where the project stands (snapshot 2026-10-08 10:50, update when it changes)
 
 Receive-only NMEA 2000 dashboard on an Arduino UNO Q. Bench work is finished; the
 device is being taken to the boat. Read `docs/hardware.md` and
 `docs/network-access.md` for detail; this file is the short version.
 
 ## State of the board right now (boat configuration)
-
-> **TEMPORARY (2026-10-08): the board is on the BENCH ACK build for the recovery soak** (D6 jumper in,
-> Pi looping traffic, `~/soak_obs.sh` logging to `~/soak.log`). `scripts/boat_preflight.sh` FAILS until it is
-> restored. To restore: `scp firmware/unoq_nmea2000_capture/sketch/sketch.ino` to the board's
-> `ArduinoApps/unoq_nmea2000_capture/sketch/`, stop the observer (`kill $(cat ~/soak_watch.pid)`),
-> `arduino-app-cli app stop` then `start user:unoq_nmea2000_capture`, remove the D6 jumper, rerun the
-> preflight, then delete this note. The text below describes the restored state.
 
 - Production sketch flashed (ListenOnly, silent pin high, 40 MHz, polled). Health line
   `0,0,0,ListenOnly,true,true,0,<uptime_ms>`. `scripts/boat_preflight.sh` passes. The MCU recovery
@@ -49,6 +42,10 @@ Full evidence is in `docs/hardware.md`; the short version:
 - **Do not make the sketch reset itself.** After any reset the base firmware's loader waits for the host
   to write a non-zero value to `0x40036400` before it starts the sketch; a sketch-side reset leaves the MCU
   dead until the host does that. A test forbids it.
+- SPI rule (found 2026-10-08): the CAN controller's SPI bus is used ONLY from `loop()`. Bridge handlers
+  run on the Bridge thread about two thirds of the time, and a handler that read the controller over SPI
+  reported mode `NormalFD` (a read of zeros) 2 times in 40. `get_health()` now reports values `loop()`
+  caches every 250 ms; a test forbids `can.`/`SPI.` inside any handler.
 - Still unknown: why serial bytes are lost (the decoder buffer shows fragments with bytes missing).
   Lead: `ACAN2517` wraps SPI transfers in `noInterrupts()`; check whether that starves the UART FIFO.
 - On the boat: note how often `MCU restarted` appears in the app log. Real traffic with real ACKing

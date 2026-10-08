@@ -103,6 +103,12 @@ the platform's own flashing step does: hardware reset over the debug port, then 
 - Install: `sudo systemctl enable --now /home/arduino/unoq-nmea2000/deploy/unoq-mcu-recover.service`
   with `deploy/` copied to `~/unoq-nmea2000/deploy/` on the board. `scripts/boat_preflight.sh` checks it.
 
+**SPI rule.** The controller's SPI bus is used only from `loop()`. Bridge handlers run on the Bridge
+thread about two thirds of the time, and two threads on one bus corrupt each other's transactions:
+`get_health()` used to read the mode itself and reported `NormalFD` (enum value 0, a read of zeros) 2 times
+in 40 on a quiet bus. It now reports values `loop()` caches every 250 ms (240 of 240 reads `ListenOnly`
+afterwards), and a test forbids `can.` or `SPI.` inside any handler.
+
 Still open: why serial bytes are lost. `ACAN2517` wraps its SPI transfers in `noInterrupts()`; whether
 that starves the UART's 8-byte FIFO (about 0.7 ms at 115200 baud) has not been measured.
 Real boat traffic, with real ACKing nodes, may behave differently from the bench.

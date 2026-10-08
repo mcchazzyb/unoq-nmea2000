@@ -119,6 +119,16 @@ static bool canInitOk = false;
 // get_health() reports uptime_ms so the Linux side can log each MCU restart.
 
 
+// Controller status cache. The Bridge handlers run on the Bridge thread (about two thirds of calls,
+// measured 2026-10-08), loop() on the main thread. The SPI bus to the MCP2518FD must only ever be
+// used from loop(): two threads on one bus corrupt each other's transactions. Seen on the board as
+// get_health() reporting mode "NormalFD" (enum value 0, i.e. a read of zeros) 2 times in 40 on a quiet
+// bus. So loop() refreshes these a few times a second and get_health() only reports them.
+static volatile uint8_t cachedModeCode = (uint8_t)ACAN2517::Configuration;
+static volatile uint32_t cachedErrorCounters = 0;
+static uint32_t lastStatusRefreshMs = 0;
+static const uint32_t STATUS_REFRESH_MS = 250;
+
 static uint16_t ringDepth() {
   return (uint16_t)((ringHead - ringTail + RING_SIZE) % RING_SIZE);
 }
@@ -186,10 +196,10 @@ String get_health() {
   out += String(totalFrameCount); out += ',';
   out += String(droppedFrameCount); out += ',';
   out += String(ringDepth()); out += ',';
-  out += operationModeName(can.currentOperationMode()); out += ',';
+  out += operationModeName((ACAN2517::OperationMode)cachedModeCode); out += ',';
   out += "true"; out += ','; // termination_off: hard-wired off, no runtime switch in this sketch
   out += (digitalRead(TRANSCEIVER_SILENT_PIN) == HIGH) ? "true" : "false"; out += ',';
-  out += String(can.errorCounters()); out += ',';
+  out += String(cachedErrorCounters); out += ',';
   out += String(millis()); // uptime_ms: the Linux side logs an MCU restart when this goes backwards
   return out;
 }
@@ -227,6 +237,10 @@ void setup() {
 
   const uint32_t errorCode = can.begin(settings, NULL); // NULL ISR: polled mode
   canInitOk = (errorCode == 0);
+  if (canInitOk) {
+    cachedModeCode = (uint8_t)can.currentOperationMode(); // setup() runs before any handler is provided
+    cachedErrorCounters = can.errorCounters();
+  }
   // BENCH ONLY: only now, with the controller up in Normal mode, let the
   // transceiver drive (needed for the ACK bit). Default stays silent.
   if (canInitOk && benchAck) digitalWrite(TRANSCEIVER_SILENT_PIN, LOW);
@@ -259,6 +273,11 @@ void loop() {
   // starves the Bridge UART. A bounded number of passes per loop keeps the
   // Bridge responsive; frames wait in the controller FIFO meanwhile.
   for (uint8_t pass = 0; pass < 4 && can.isr_core(); pass++) {}
+  if (canInitOk && (uint32_t)(millis() - lastStatusRefreshMs) >= STATUS_REFRESH_MS) {
+    lastStatusRefreshMs = millis();
+    cachedModeCode = (uint8_t)can.currentOperationMode();
+    cachedErrorCounters = can.errorCounters();
+  }
   CANMessage message;
   while (can.receive(message)) {
     uint16_t nextHead = (uint16_t)((ringHead + 1) % RING_SIZE);

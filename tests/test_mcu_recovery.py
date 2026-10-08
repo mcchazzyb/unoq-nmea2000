@@ -160,3 +160,18 @@ def test_health_line_without_uptime_still_parses(receiver_module):
     bridge.lines = ["1,2,3,ListenOnly,true,true,4"]
     h = mod.ArduinoBridgeCanReceiver().health()
     assert h.dropped_frames == 2 and h.error_count == 4
+
+
+# --- SPI is only used from loop() --------------------------------------------------------
+@pytest.mark.parametrize("path", SKETCHES)
+def test_bridge_handlers_never_touch_the_can_controller(path):
+    """Bridge handlers run on the Bridge thread; the controller's SPI bus must only be used from
+    loop(). Found 2026-10-08: get_health() read the mode over SPI and reported NormalFD (a read of
+    zeros) 2 times in 40 on a quiet bus."""
+    s = path.read_text()
+    for handler in ("String get_frame_batch()", "String get_health()", "bool get_can_init_ok()"):
+        body = s[s.index(handler):].split("\n}", 1)[0]
+        assert "can." not in body, handler
+        assert "SPI." not in body, handler
+    loop = s[s.index("void loop() {"):]
+    assert "cachedModeCode = " in loop and "can.currentOperationMode()" in loop
