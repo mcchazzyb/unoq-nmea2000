@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from protocol.domain import UNSET
+from service.bus_stats import BusStats
 from service.cache import LiveStateCache
 from service.discovery import DiscoveryMode
 from service.raw_log import CorruptLine, iter_records
@@ -106,6 +107,7 @@ def create_app(
     capture_dir: Path,
     device_info: Optional[dict] = None,
     settings: Optional[SettingsStore] = None,
+    bus_stats: Optional[BusStats] = None,
 ) -> FastAPI:
     """Build the FastAPI app wired to a specific cache/discovery/capture_dir.
 
@@ -149,6 +151,18 @@ def create_app(
             "receiver_ok_age_s": cache.receiver_ok_age_s(),
             "device_info": device_info,
         }
+
+    @app.get("/api/v1/bus-status")
+    def get_bus_status():
+        """What the bus has actually delivered, independent of decoding: frames received, age of the last
+        frame, the MCU's own counters and controller mode. `state` is no_frames_yet / receiving / silent.
+        The dashboard's green dot only means the browser reaches the board; this says whether the bus does."""
+        if bus_stats is None:
+            return {"available": False}
+        snap = bus_stats.snapshot(include_pgns=False)
+        snap["available"] = True
+        snap["receiver_ok_age_s"] = cache.receiver_ok_age_s()
+        return snap
 
     def _live_payload() -> dict:
         """One builder for REST and WebSocket so they can never disagree."""

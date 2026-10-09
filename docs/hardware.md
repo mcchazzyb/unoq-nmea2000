@@ -62,6 +62,22 @@ on a bench bus. Key facts:
 2. `arduino-app-cli app restart user:unoq_nmea2000_capture`
 3. Remove the D6 jumper. Expect health `ListenOnly,true,true`.
 
+## The production image has not been validated on a live bus
+
+Everything measured on the bench so far (stall rate, the 1.8 MB captures, the dashboard values) came from
+the bench ACK build, or from the production sketch against a bus where the Pi's frames were never
+acknowledged. The unmodified production image (ListenOnly, no ACK, silent pin high) has **never been
+run against a bus with ACKing nodes**. The boat is therefore its first real test. Open questions that only
+a bus with a second, ACKing node can answer:
+
+- does the production build receive normally while other nodes acknowledge, and with what error counters;
+- does the Bridge stall at the same rate without the bench ACK code;
+- do the decoders cope with real devices (the golden fixtures are this repo's own).
+
+To validate it before the next trip: the Pi sends, a third node ACKs (a second Pi/CAN HAT, a USB-CAN
+adapter, or a real NMEA 2000 sensor on the bench bus), the UNO Q runs the production sketch with no D6
+jumper. Then compare the black box (`docs/diagnostics.md`) with the Pi's own transmit counts.
+
 ## Known issue: the Bridge can wedge (mitigated, root cause not found)
 
 Under sustained CAN traffic the RouterBridge on the MCU occasionally stops serving calls. Without
@@ -100,8 +116,12 @@ the platform's own flashing step does: hardware reset over the debug port, then 
   (15 s detection plus reset and reconnect).
 - A reset does not transmit. The MCP2518FD keeps its ListenOnly mode and D4 behaves as at power-up
   (the accepted software-only deviation, task 9.2).
-- Install: `sudo systemctl enable --now /home/arduino/unoq-nmea2000/deploy/unoq-mcu-recover.service`
-  with `deploy/` copied to `~/unoq-nmea2000/deploy/` on the board. `scripts/boat_preflight.sh` checks it.
+- Install: copy `deploy/` to `~/unoq-nmea2000/deploy/` on the board, then
+  `sudo cp ~/unoq-nmea2000/deploy/unoq-mcu-recover.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now unoq-mcu-recover`.
+  Copy the unit; never `systemctl enable /home/...`: that symlink points into the separate `/home`
+  partition, which is mounted after systemd reads `/etc/systemd/system`, so the unit failed to load on
+  both boat boots (2026-10-09) and the safety net did not run. `scripts/boat_preflight.sh` checks that the
+  service is active and that the unit is a real file.
 
 **SPI rule.** The controller's SPI bus is used only from `loop()`. Bridge handlers run on the Bridge
 thread about two thirds of the time, and two threads on one bus corrupt each other's transactions:

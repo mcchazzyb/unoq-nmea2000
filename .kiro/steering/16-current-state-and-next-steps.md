@@ -3,7 +3,7 @@ title: Current state and next steps (hand-off snapshot)
 inclusion: always
 ---
 
-# Where the project stands (snapshot 2026-10-08 10:50, update when it changes)
+# Where the project stands (snapshot 2026-10-09 17:30, update when it changes)
 
 Receive-only NMEA 2000 dashboard on an Arduino UNO Q. Bench work is finished; the
 device is being taken to the boat. Read `docs/hardware.md` and
@@ -25,6 +25,30 @@ device is being taken to the boat. Read `docs/hardware.md` and
 - Pending physical steps for the owner: remove the D6 jumper (inert on the production
   sketch, but remove it), fit a fused, surge-rated 5 V / 3 A USB-C feed from a switched
   circuit (datasheet: USB-C is 5 V only, VIN 7 to 24 V, no surge protection on the board).
+
+## First boat trip (2026-10-09): what happened and what changed
+
+- The board was on its own BoatFi hotspot (10.42.0.1). The owner saw Engine and Fuel on the dashboard with no
+  metrics and no GPS; the bus was terminated at both ends. **Cause not established**: the evidence was lost.
+  The board has no RTC (log times are wrong until NTP), the journal lost its last minutes, the app container and
+  its log were deleted at the next boot, and the boat session's capture file is 0 bytes. Do not assume
+  "no frames" or "frames not decoded": check the new Bus status strip / black box on the next trip.
+- **Fixed:** `unoq-mcu-recover` was a symlink into `/home`, so it never loaded on either boat boot. Units are now
+  COPIED into `/etc/systemd/system` with `RequiresMountsFor`; the preflight rejects a symlink.
+- **Built:** fsynced flight recorder (app: `.cache/blackbox/`, host: `~/unoq-blackbox/`), journald synced every
+  10 s, a Bus status strip + `GET /api/v1/bus-status`, `scripts/blackbox_report.py --fetch`, and
+  `scripts/install_blackbox.sh`. See `docs/diagnostics.md`. Verified with a no-sync reboot on the board.
+- **Fixed:** ingestion batches were 32 frames (an endless generator), so a quiet bus held frames unsaved and
+  invisible. `_BATCH_SIZE` is 1.
+- **Never done:** the unmodified production image has not run against a bus with ACKing nodes (`docs/hardware.md`).
+- **Fixed:** Docker's 172.20.0.0/16 overlapped the iPhone hotspot (172.20.10.0/28) and made the dashboard
+  unreachable from a phone on it (reproduced in a network namespace). Docker's pool is now 198.18.0.0/16
+  (`scripts/fix_docker_subnet.sh`; check with `scripts/check_hotspot_reachability.sh`). Not yet tried with a real phone.
+- The boat bus has about 5 NMEA feeds (ACKing nodes): expect 100+ frames/s. The Bridge moves 4 frames per
+  20 ms poll and every frame is fsynced, so watch "MCU dropped" in the Bus status strip.
+- Phone/laptop access away from home: BoatFi 10.42.0.1 was the owner's path on the boat; both it and the
+  iPhone hotspot are unproven end to end with real clients. Browser dashboard cards live in localStorage per
+  web address, so stale cards from the bench can show "Engine"/"Fuel" with no values.
 
 ## The Bridge stall: mitigated by a host service, root cause still open
 
@@ -53,9 +77,9 @@ Full evidence is in `docs/hardware.md`; the short version:
 
 ## Next steps, in order
 
-1. **Boat day:** run `scripts/boat_preflight.sh arduino@<board>` (use
-   `arduino@10.42.0.1` on BoatFi), connect to the bus, note whether and when the stall
-   happens, save the first real capture (`scripts/promote_capture.py`). A real capture is
+1. **Boat day:** run `scripts/boat_preflight.sh arduino@<board>` (now also checks the black box; use
+   `arduino@10.42.0.1` on BoatFi), connect to the bus, read the Bus status strip, note whether and when the stall
+   happens, run `scripts/blackbox_report.py --fetch` afterwards, save the first real capture (`scripts/promote_capture.py`). A real capture is
    the independent reference for checking the decoders against canboat.
 2. Find why serial bytes are lost (see the stall section); the recovery service is the safety net,
    not the fix. Optionally measure the real-bus stall rate on the boat first.

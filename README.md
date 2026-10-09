@@ -34,6 +34,9 @@ Not yet done:
 - **Bridge stall:** the MCU's Bridge can wedge under sustained traffic (53 times in 10.4 h on the
   bench). A host service resets the MCU and the dashboard recovers in about 20 s with no app restart;
   the underlying cause (lost serial bytes) is not found. See [docs/hardware.md](docs/hardware.md).
+- **Diagnostics that survive a dirty power-off:** an fsynced black box (app and host), a Bus status
+  strip on the dashboard, and `scripts/blackbox_report.py`. See [docs/diagnostics.md](docs/diagnostics.md).
+- **Production image on a live bus:** never validated, see [docs/hardware.md](docs/hardware.md).
 - **Boat preflight:** `scripts/boat_preflight.sh arduino@<board>` checks that the
   board runs the production build. The current hand-off state is in
   `.kiro/steering/16-current-state-and-next-steps.md`.
@@ -87,6 +90,7 @@ make replay FILE=fixtures/golden/engine_rpm_change.jsonl
 - [docs/tank-data.md](tank-data.md) — fuel/tank level decoding
 - [docs/hardware.md](docs/hardware.md) — UNO Q build, bench testing, the
   bench-only ACK mode, known issues
+- [docs/diagnostics.md](docs/diagnostics.md) — black box, bus status strip, reading logs after a trip
 - [docs/network-access.md](docs/network-access.md) — reaching the dashboard
   from a phone (WiFi profiles, hotspot fallback, Bluetooth)
 - [docs/testing.md](testing.md) — test suite layout, coverage gates, running

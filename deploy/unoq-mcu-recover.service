@@ -1,13 +1,19 @@
 # Resets the UNO Q's MCU when its Bridge stops answering (see deploy/unoq_mcu_recover.py).
-# Install on the board:
-#   (the repo is checked out at /home/arduino/unoq-nmea2000, as for the BLE publisher)
-#   sudo systemctl enable --now /home/arduino/unoq-nmea2000/deploy/unoq-mcu-recover.service
+# Install on the board (the repo is checked out at /home/arduino/unoq-nmea2000, as for the BLE publisher):
+#   sudo cp /home/arduino/unoq-nmea2000/deploy/unoq-mcu-recover.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now unoq-mcu-recover
+#
+# COPY the file; do NOT `systemctl enable /home/...service`. That makes a symlink into /home,
+# which is a separate partition mounted after systemd reads /etc/systemd/system. On the boat
+# (2026-10-09) the dangling link meant the unit failed to load on every boot and the stall
+# safety net never ran.
 #
 # Runs as root because the debug-port reset needs /dev/gpiochip1. It only ever talks to the
 # dashboard on loopback and to the MCU's debug port; it transmits nothing on the CAN bus.
 [Unit]
 Description=unoq-nmea2000 MCU recovery (reset the MCU when the Bridge wedges)
 After=network.target
+RequiresMountsFor=/home/arduino
 
 [Service]
 Type=simple

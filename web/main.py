@@ -26,11 +26,14 @@ op guide, not this code, is the thing that must get this right).
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 from pathlib import Path
 
+from service.bus_stats import BusStats
 from service.cache import LiveStateCache
 from service.discovery import DiscoveryMode
+from service.flight_recorder import FlightRecorder, RecorderLogHandler
 from web.api import create_app
 from web.runtime import LiveIngestionRuntime, build_receiver
 
@@ -77,7 +80,13 @@ def main() -> int:
 
     cache = LiveStateCache()
     discovery = DiscoveryMode()
-    app = create_app(cache, discovery, capture_dir)
+    bus_stats = BusStats()
+    app = create_app(cache, discovery, capture_dir, bus_stats=bus_stats)
+
+    # Flight recorder: fsynced diagnostics that survive a dirty power-off (service/flight_recorder.py).
+    # Lives beside the capture directory, not inside it, so clearing captures never clears the evidence.
+    recorder = FlightRecorder(Path(os.environ.get("UNOQ_BLACKBOX_DIR", str(capture_dir.parent / "blackbox"))))
+    logging.getLogger().addHandler(RecorderLogHandler(recorder))
 
     # Requirement 14.10, 14.11: a continuous receiver loop feeds the SAME
     # cache/discovery the Web_API reads, selected by configuration only
@@ -85,7 +94,7 @@ def main() -> int:
     # host-testable behavior) or 'hardware' (Stage 9's real UNO Q receiver).
     receiver_kind = os.environ.get("UNOQ_RECEIVER", "simulator")
     receiver = build_receiver(receiver_kind)
-    runtime = LiveIngestionRuntime(cache, discovery, capture_dir, receiver)
+    runtime = LiveIngestionRuntime(cache, discovery, capture_dir, receiver, bus_stats, recorder)
     runtime.start()
 
     in_container = os.environ.get("UNOQ_IN_CONTAINER") == "1"

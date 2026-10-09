@@ -495,6 +495,25 @@
     cursor: pointer;
   }
 
+  /* Bus status: what the CAN bus has actually delivered. The green dot above only means the browser
+     reaches the board; this strip says whether frames arrive. Phone-first (Requirement 30). */
+  #bus-status {
+    margin: 0;
+    padding: 0.7rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.95rem;
+    line-height: 1.35;
+  }
+  #bus-status[hidden] { display: none; }
+  #bus-status .bus-headline { font-weight: 600; }
+  #bus-status .bus-detail { color: var(--text-mid); font-family: var(--mono); font-size: 0.8rem; margin-top: 0.2rem; overflow-wrap: anywhere; }
+  #bus-status.receiving { background: color-mix(in srgb, var(--online) 10%, transparent); }
+  #bus-status.receiving .bus-headline { color: var(--online); }
+  #bus-status.silent { background: color-mix(in srgb, var(--stale) 12%, transparent); }
+  #bus-status.silent .bus-headline { color: var(--stale); }
+  #bus-status.no_frames_yet, #bus-status.unreachable { background: color-mix(in srgb, var(--offline) 12%, transparent); }
+  #bus-status.no_frames_yet .bus-headline, #bus-status.unreachable .bus-headline { color: var(--offline); }
+
   /* Phone-portrait base already applies (Requirement 30.1); this rule only
      tightens padding further at the narrowest end of the range. */
   @media (max-width: 480px) {
@@ -508,6 +527,11 @@
   <h1><strong>NMEA2000</strong> Dashboard</h1>
   <span id="conn-indicator" class="offline">connecting</span>
 </header>
+
+<div id="bus-status" role="status" aria-live="polite" hidden>
+  <div class="bus-headline" id="bus-headline"></div>
+  <div class="bus-detail" id="bus-detail"></div>
+</div>
 
 <main>
   <section class="panel panel-wide" id="dashboard-section">
@@ -1343,6 +1367,56 @@
   }
   pollDiscovery();
   setInterval(pollDiscovery, 1000);
+
+  // Bus status: frames the CAN bus has actually delivered (GET /api/v1/bus-status). Separate from the
+  // connection dot, which only says the browser can reach the board.
+  function renderBusStatus(status) {
+    const box = document.getElementById("bus-status");
+    const headline = document.getElementById("bus-headline");
+    const detail = document.getElementById("bus-detail");
+    if (!status || status.available === false) { box.hidden = true; return; }
+    const fmt = (n) => Number(n).toLocaleString();
+    const age = (v) => (v === null || v === undefined ? "n/a" : v + " s");
+    box.hidden = false;
+    box.className = status.state;
+    if (status.state === "receiving") {
+      headline.textContent = "Receiving from the bus: " + status.frames_per_s + " frames/s";
+    } else if (status.state === "silent") {
+      headline.textContent = "Bus went silent " + age(status.last_frame_age_s) + " ago (it had been sending)";
+    } else {
+      headline.textContent = "No frames received from the bus yet";
+    }
+    const mcu = status.mcu;
+    const parts = [
+      "frames " + fmt(status.frames_total),
+      "last " + age(status.last_frame_age_s),
+      status.sources_seen + " devices",
+      status.pgns_seen + " PGNs",
+    ];
+    if (mcu) {
+      parts.push("controller " + mcu.mode, "bus errors " + mcu.error_counters,
+        "MCU counted " + fmt(mcu.mcu_frames), "MCU dropped " + fmt(mcu.mcu_dropped), "MCU restarts " + mcu.mcu_restarts);
+    } else {
+      parts.push("controller: no reading yet");
+    }
+    parts.push("bridge answered " + age(status.receiver_ok_age_s) + " ago");
+    if (status.receiver_errors) parts.push("receiver errors " + status.receiver_errors);
+    detail.textContent = parts.join(" \u00b7 ");
+  }
+
+  async function pollBusStatus() {
+    try {
+      const response = await fetch("/api/v1/bus-status");
+      if (response.ok) renderBusStatus(await response.json());
+    } catch (e) {
+      const box = document.getElementById("bus-status");
+      box.hidden = false; box.className = "unreachable";
+      document.getElementById("bus-headline").textContent = "Cannot reach the board";
+      document.getElementById("bus-detail").textContent = "";
+    }
+  }
+  pollBusStatus();
+  setInterval(pollBusStatus, 2000);
 
   startRestFallback();
   connectWebSocket();

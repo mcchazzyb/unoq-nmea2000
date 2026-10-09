@@ -23,8 +23,10 @@ from typing import Iterator
 
 from protocol.receiver import CanFrame, CanHealth, ICanReceiver
 from protocol.registry import DEFAULT_REGISTRY
+from service.bus_stats import BusStats
 from service.cache import LiveStateCache
 from service.discovery import DiscoveryMode
+from service.flight_recorder import FlightRecorder
 from service.ingestion import IngestionService
 from service.raw_log import RawCaptureLog
 from service.session_store import SessionStore
@@ -33,8 +35,11 @@ from simulator.scenarios import DF140SmokeTestScenario
 
 logger = logging.getLogger(__name__)
 
-#: Frames pulled from the receiver and handed to one ingest_batch() call.
-_BATCH_SIZE = 32
+#: Frames pulled from the receiver and handed to one ingest_batch() call. MUST stay 1: a receiver's
+#: frames() is an endless generator, so a batch of N waits for N frames. On a quiet bus (a few frames
+#: a second) a batch of 32 held frames in memory for tens of seconds, unsaved and not on the
+#: dashboard, and lost them in a power cut. Every frame is fsynced on its own anyway.
+_BATCH_SIZE = 1
 #: Idle poll interval when a receiver's frames() generator is momentarily
 #: exhausted (e.g. between simulator cycles) -- avoids a busy-loop.
 _IDLE_POLL_S = 0.05
@@ -46,6 +51,9 @@ _IDLE_POLL_S = 0.05
 #: polling correctly underneath. A separate timer thread, not tied to the
 #: frame-batching cadence, is the fix.
 _HEALTH_POLL_INTERVAL_S = 1.0
+#: How often the flight recorder writes a tick (fsynced), and a fuller summary with per-PGN counts.
+_TICK_INTERVAL_S = 10.0
+_SUMMARY_EVERY_TICKS = 6
 
 
 #: Per-cycle random walk bounds for SimulatorReceiver's live demo feed --
@@ -205,6 +213,8 @@ def _run_loop(
     capture_dir,
     receiver: ICanReceiver,
     stop: threading.Event,
+    stats: BusStats | None = None,
+    recorder: FlightRecorder | None = None,
 ) -> None:
     """The background thread body. Constructs `RawCaptureLog`/`SessionStore`
     HERE, on this thread, rather than in the constructor on the caller's
@@ -244,13 +254,22 @@ def _run_loop(
             for batch in _batched(receiver.frames(), _BATCH_SIZE):
                 if stop.is_set():
                     return
-                service.ingest_batch(batch)
-        except Exception:  # noqa: BLE001 - deliberate: never let this thread die silently
+                result = service.ingest_batch(batch)
+                if stats is not None:
+                    stats.note_batch(batch, result)
+        except Exception as exc:  # noqa: BLE001 - deliberate: never let this thread die silently
+            if stats is not None:
+                stats.note_receiver_error(exc)
             logger.exception("Live_Ingestion_Runtime: receiver loop raised; retrying")
             time.sleep(_IDLE_POLL_S)
 
 
-def _health_poll_loop(receiver: ICanReceiver, cache: LiveStateCache, stop: threading.Event) -> None:
+def _health_poll_loop(
+    receiver: ICanReceiver,
+    cache: LiveStateCache,
+    stop: threading.Event,
+    stats: BusStats | None = None,
+) -> None:
     """Polls `receiver.health()` into `cache.vessel.health.can_health` on a
     FIXED timer, independent of the frame-batching loop (`_run_loop`) and
     its data volume -- this is the ONLY place in the host codebase that
@@ -270,9 +289,48 @@ def _health_poll_loop(receiver: ICanReceiver, cache: LiveStateCache, stop: threa
                 cache.vessel.health = DeviceHealth()
             cache.vessel.health.can_health = receiver.health()
             cache.note_receiver_ok()
+            if stats is not None:
+                snapshot = getattr(receiver, "mcu_snapshot", None)
+                stats.note_mcu(snapshot() if callable(snapshot) else None)
         except Exception:  # noqa: BLE001 - deliberate: health polling must never crash the process
             logger.exception("Live_Ingestion_Runtime: health poll raised; retrying")
         stop.wait(_HEALTH_POLL_INTERVAL_S)
+
+
+def _flight_recorder_loop(
+    recorder: FlightRecorder,
+    stats: BusStats,
+    cache: LiveStateCache,
+    stop: threading.Event,
+    tick_interval_s: float = _TICK_INTERVAL_S,
+) -> None:
+    """Write a durable tick every few seconds and an event whenever the bus state changes
+    (no frames yet / receiving / silent). The point is a record that is still on disk after the power
+    was cut: how many frames the app and the MCU saw, and when they started or stopped."""
+    recorder.record("start", note="app flight recorder started")
+    last_state = stats.state()
+    ticks = 0
+    while not stop.is_set():
+        try:
+            state = stats.state()
+            if state != last_state:
+                recorder.record("bus_state", old=last_state, new=state, **stats.snapshot(include_pgns=False))
+                last_state = state
+            ticks += 1
+            full = ticks % _SUMMARY_EVERY_TICKS == 0
+            snap = stats.snapshot(include_pgns=full)
+            vessel = cache.snapshot()
+            recorder.record(
+                "summary" if full else "tick",
+                receiver_ok_age_s=cache.receiver_ok_age_s(),
+                capture_halted=cache.is_stale(),
+                engines=len(vessel.engines),
+                tanks=len(vessel.tanks),
+                **snap,
+            )
+        except Exception:  # noqa: BLE001 - the recorder must never take the app down
+            logger.exception("flight recorder tick failed")
+        stop.wait(tick_interval_s)
 
 
 class LiveIngestionRuntime:
@@ -289,30 +347,46 @@ class LiveIngestionRuntime:
         discovery: DiscoveryMode,
         capture_dir,
         receiver: ICanReceiver,
+        stats: BusStats | None = None,
+        recorder: FlightRecorder | None = None,
     ) -> None:
         self.cache = cache
         self.discovery = discovery
         self.capture_dir = capture_dir
         self.receiver = receiver
+        self.stats = stats
+        self.recorder = recorder
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._health_thread: threading.Thread | None = None
+        self._recorder_thread: threading.Thread | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(
             target=_run_loop,
-            args=(self.discovery, self.cache, self.capture_dir, self.receiver, self._stop),
+            args=(
+                self.discovery, self.cache, self.capture_dir, self.receiver, self._stop,
+                self.stats, self.recorder,
+            ),
             name="live-ingestion-runtime",
             daemon=True,  # Requirement 14.11: process exit is clean, no join required
         )
         self._thread.start()
         self._health_thread = threading.Thread(
             target=_health_poll_loop,
-            args=(self.receiver, self.cache, self._stop),
+            args=(self.receiver, self.cache, self._stop, self.stats),
             name="live-ingestion-runtime-health",
             daemon=True,
         )
         self._health_thread.start()
+        if self.recorder is not None and self.stats is not None:
+            self._recorder_thread = threading.Thread(
+                target=_flight_recorder_loop,
+                args=(self.recorder, self.stats, self.cache, self._stop),
+                name="flight-recorder",
+                daemon=True,
+            )
+            self._recorder_thread.start()
 
     def stop(self) -> None:
         self._stop.set()

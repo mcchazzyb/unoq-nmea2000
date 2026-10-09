@@ -48,8 +48,15 @@ nmcli connection add type wifi ifname wlan0 con-name boatfi-ap ssid BoatFi mode 
 - If the home network drops while the board runs, NetworkManager may fall to
   BoatFi and will not switch back by itself. A power cycle, or
   `nmcli connection up <home profile>`, recovers it.
-- The Docker bridge uses 172.20.0.0/16, which overlaps the iPhone hotspot's
-  172.20.10.x range. Untested; check it when first trying the phone hotspot.
+- **Docker vs the iPhone hotspot (found and fixed 2026-10-09).** iOS hands out 172.20.10.0/28 (address
+  range is not configurable), and Docker had put the app network on 172.20.0.0/16. The container then
+  treated the phone as on-link, its replies never left the Docker bridge, and the dashboard never answered
+  (ssh still worked). Reproduced with `scripts/check_hotspot_reachability.sh`, fixed by
+  `scripts/fix_docker_subnet.sh` (Docker's pool is now 198.18.0.0/16). Both are simulations of the subnet
+  on a virtual interface, not a real phone; the real-phone test is still to do.
+- The board's address on a phone hotspot is whatever the phone's DHCP gives (it was 172.20.10.2 when the board
+  joined first). Find it from the laptop: `ssh arduino@boatlab.local`, or the host black box
+  (`~/unoq-blackbox`) records the address on every change. Android hotspots use other ranges.
 - There is no authentication on the dashboard (steering 15). The WiFi
   password is the only access control.
 

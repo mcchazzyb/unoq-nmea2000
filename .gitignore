@@ -32,3 +32,4 @@ session.db-wal
 
 # Local Kiro CLI tooling state (not project source)
 .kiro/settings/
+blackbox/

@@ -186,6 +186,23 @@ class ArduinoBridgeCanReceiver:
                 prev.uptime_ms, parsed.uptime_ms, self.mcu_restarts,
             )
 
+    def mcu_snapshot(self) -> dict | None:
+        """The MCU's own last health line as a dict (what the controller itself counted), for the
+        flight recorder and the dashboard's bus status. None until the first health line parses."""
+        h = self._last_health
+        if h is None:
+            return None
+        return {
+            "mcu_frames": h.total_frames,
+            "mcu_dropped": h.dropped_frames,
+            "mcu_queue_depth": h.queue_depth,
+            "mode": h.controller_mode,
+            "silent_pin_high": h.silent_pin_high,
+            "error_counters": h.error_counters,
+            "mcu_uptime_ms": h.uptime_ms,
+            "mcu_restarts": self.mcu_restarts,
+        }
+
     def health(self) -> CanHealth:
         """Requirement 24.5: health metrics exposed over the Bridge. Returns
         the LAST successfully parsed health snapshot if the current Bridge

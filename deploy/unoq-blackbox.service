@@ -1,0 +1,22 @@
+# Host-side black box: fsynced log of network, clock, services, Bluetooth and the app's bus status
+# (see deploy/unoq_blackbox.py). Survives a dirty power-off; written to /home/arduino/unoq-blackbox/.
+# Install with scripts/install_blackbox.sh (it COPIES this file into /etc/systemd/system).
+#
+# COPY, never `systemctl enable /home/...`: /home is a separate partition mounted after systemd reads
+# /etc/systemd/system, so a symlink into it fails to load (the boat, 2026-10-09).
+#
+# Runs as root so it can read NetworkManager and BlueZ state. It only runs status commands and one GET to
+# the dashboard on loopback. It transmits nothing on the CAN bus.
+[Unit]
+Description=unoq-nmea2000 host black box (fsynced diagnostics)
+After=network.target
+RequiresMountsFor=/home/arduino
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/arduino/unoq-nmea2000/deploy/unoq_blackbox.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
