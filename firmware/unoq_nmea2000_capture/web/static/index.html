@@ -514,6 +514,31 @@
   #bus-status.no_frames_yet, #bus-status.unreachable { background: color-mix(in srgb, var(--offline) 12%, transparent); }
   #bus-status.no_frames_yet .bus-headline, #bus-status.unreachable .bus-headline { color: var(--offline); }
 
+  /* Two pages: Dashboard (dials and data only) and Setup (bus status, sensor
+     selection, tank sizes, discovered devices). Touch targets are 44px high. */
+  main[hidden] { display: none; }
+  #tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  #tabs button {
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 0.5rem 1rem;
+    background: transparent;
+    color: var(--text-mid);
+    border: 0;
+    border-bottom: 3px solid transparent;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #tabs button:hover { color: var(--text); }
+  #tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  #setup-alert { color: var(--stale); font-weight: 600; }
+  #setup-alert[hidden] { display: none; }
+  #bus-status { border-bottom: 0; padding: 0.7rem 0.9rem; }
+
   /* Phone-portrait base already applies (Requirement 30.1); this rule only
      tightens padding further at the narrowest end of the range. */
   @media (max-width: 480px) {
@@ -528,16 +553,14 @@
   <span id="conn-indicator" class="offline">connecting</span>
 </header>
 
-<div id="bus-status" role="status" aria-live="polite" hidden>
-  <div class="bus-headline" id="bus-headline"></div>
-  <div class="bus-detail" id="bus-detail"></div>
-</div>
+<nav id="tabs" role="tablist" aria-label="Pages">
+  <button type="button" role="tab" id="tab-dashboard" data-tab="dashboard" aria-controls="view-dashboard" aria-selected="true">Dashboard</button>
+  <button type="button" role="tab" id="tab-setup" data-tab="setup" aria-controls="view-setup" aria-selected="false" tabindex="-1">Setup<span id="setup-alert" hidden> &middot; check bus</span></button>
+</nav>
 
-<main>
+<main id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
   <section class="panel panel-wide" id="dashboard-section">
     <h2>My dashboard</h2>
-    <button id="selection-toggle" type="button" aria-expanded="false">Select sensors &amp; attributes</button>
-    <div id="selection-panel" aria-label="Sensor and attribute selection"></div>
     <div id="dashboard-cards"></div>
     <div id="dashboard-empty" style="display:none;">
       No sensors selected yet.<br>
@@ -570,6 +593,22 @@
     <h2>Navigation</h2>
     <div id="navigation-fields"></div>
   </section>
+</main>
+
+<main id="view-setup" role="tabpanel" aria-labelledby="tab-setup" hidden>
+  <section class="panel panel-wide" id="bus-section">
+    <h2>Bus status</h2>
+    <div id="bus-status" role="status" aria-live="polite" hidden>
+      <div class="bus-headline" id="bus-headline"></div>
+      <div class="bus-detail" id="bus-detail"></div>
+    </div>
+  </section>
+
+  <section class="panel panel-wide" id="sensors-section">
+    <h2>Sensors on the dashboard</h2>
+    <button id="selection-toggle" type="button" aria-expanded="false">Select sensors &amp; attributes</button>
+    <div id="selection-panel" aria-label="Sensor and attribute selection"></div>
+  </section>
 
   <section class="panel panel-wide" id="settings-panel">
     <h2>Boat settings</h2>
@@ -578,7 +617,7 @@
       <button type="button" data-unit="litres" aria-pressed="true">Litres</button>
       <button type="button" data-unit="us_gallons" aria-pressed="false">US gal</button>
     </div>
-    <p id="settings-help">Fuel tank sizes in litres. Used for litres remaining, endurance and range. Saved on the board, so every phone sees the same values.</p>
+    <p id="settings-help">Fuel tank sizes in litres. Used for litres remaining, endurance and range. Set these any time — you don't need to be connected to the engine. Saved on the board, so every phone sees the same values.</p>
     <form id="tank-settings" novalidate>
       <div id="tank-setting-rows"></div>
       <button id="tank-settings-save" type="submit">Save tank sizes</button>
@@ -657,7 +696,7 @@
   const MPS_TO_KNOTS = 3600 / 1852; // exact: 1 knot = 1852 m per hour
   const UNITS = {
     rpm: "rpm", coolant_temp: "\u00b0C", oil_pressure: "Pa", alternator_voltage: "V",
-    fuel_rate: "L/h", engine_hours: "s", trim: "%",
+    fuel_rate: "L/h", engine_hours: "h", trim: "%",
     level_percent: "%", capacity_litres: "L", quantity_remaining_litres: "L",
     battery_voltage: "V", charging_voltage: "V", current: "A",
     cog: "\u00b0", sog: "kn", heading: "\u00b0", depth: "m", water_temp: "\u00b0C", wind: "kn",
@@ -1039,6 +1078,43 @@
     });
   }
 
+  // --- Tabs: Dashboard (dials and data) and Setup (everything you configure or diagnose) ---
+  const TAB_NAMES = ["dashboard", "setup"];
+  function showTab(name, updateHash) {
+    if (!TAB_NAMES.includes(name)) name = "dashboard";
+    for (const tab of TAB_NAMES) {
+      const selected = tab === name;
+      document.getElementById("view-" + tab).hidden = !selected;
+      const button = document.getElementById("tab-" + tab);
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    }
+    if (updateHash !== false) history.replaceState(null, "", name === "dashboard" ? location.pathname + location.search : "#" + name);
+    if (name === "setup" && !selectionOpenedOnce) {
+      // The sensor list is the main job of this page; do not hide it behind a second tap the first time.
+      selectionOpenedOnce = true;
+      document.getElementById("selection-panel").classList.add("open");
+      document.getElementById("selection-toggle").setAttribute("aria-expanded", "true");
+      renderSelectionPanel(latestLivePayload);
+    }
+    window.scrollTo(0, 0);
+  }
+  let selectionOpenedOnce = false;
+  for (const button of document.querySelectorAll("#tabs button[data-tab]")) {
+    button.addEventListener("click", () => showTab(button.dataset.tab));
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const next = TAB_NAMES[(TAB_NAMES.indexOf(button.dataset.tab) + (event.key === "ArrowRight" ? 1 : -1) + TAB_NAMES.length) % TAB_NAMES.length];
+      showTab(next);
+      document.getElementById("tab-" + next).focus();
+    });
+  }
+  window.addEventListener("hashchange", () => showTab(location.hash.slice(1), false));
+  showTab(location.hash.slice(1), false);
+
+  // A bus that is not delivering frames is the one setup fact worth showing on the Dashboard tab.
+  function markSetupAlert(on) { document.getElementById("setup-alert").hidden = !on; }
+
   document.getElementById("selection-toggle").addEventListener("click", () => {
     const panel = document.getElementById("selection-panel");
     const btn = document.getElementById("selection-toggle");
@@ -1048,6 +1124,7 @@
     if (nowOpen) renderSelectionPanel(latestLivePayload);
   });
   document.getElementById("dashboard-empty-select").addEventListener("click", () => {
+    showTab("setup");
     document.getElementById("selection-panel").classList.add("open");
     document.getElementById("selection-toggle").setAttribute("aria-expanded", "true");
     renderSelectionPanel(latestLivePayload);
@@ -1170,31 +1247,62 @@
   let settingRowsKey = null;
 
   function renderTankSettings(tanks) {
-    const fuelKeys = Object.keys(tanks || {}).filter((k) => tanks[k].fluid_type === 0).sort();
-    const signature = fuelKeys.join(",");
+    // A tank size is a static boat fact the owner must be able to set at ANY
+    // time, including with no bus connected. So the rows are the UNION of:
+    //  - fuel tanks currently seen on the bus (keyed by their live key), and
+    //  - every tank size already saved (so an offline tank is still editable),
+    // and we always guarantee at least one row (instance 0) so there is never
+    // a dead-end "nothing to type into" state.
+    const detected = Object.keys(tanks || {}).filter((k) => tanks[k] && tanks[k].fluid_type === 0);
+    const rows = new Map(); // save-key -> {label, sub, placeholder, source}
+    const consumed = new Set(); // stored keys already shown as (or folded into) a live tank's row
+    for (const liveKey of detected) {
+      // ONE row per live tank. The server says which key to save under (the stable NAME key when known)
+      // and which stored key its current size came from, so old aliases collapse instead of piling up.
+      const tank = tanks[liveKey];
+      const [instance, address] = liveKey.split(":");
+      const rowKey = tank.setting_key || liveKey;
+      const source = tank.setting_source_key || null;
+      rows.set(rowKey, { label: "Fuel tank " + instance, sub: "address " + address, source,
+                         placeholder: tank.capacity_litres ? String(tank.capacity_litres) : "e.g. 200" });
+      consumed.add(rowKey);
+      if (source) consumed.add(source);
+    }
+    for (const key of Object.keys(configuredCapacities)) {
+      if (rows.has(key) || consumed.has(key)) continue;
+      let instance = key, sub = "saved";
+      if (key.startsWith("inst:")) { instance = key.slice(5); sub = "not on bus"; }
+      else if (key.startsWith("name:")) { instance = key.split(":")[2]; sub = "saved sender"; }
+      else if (key.includes(":")) { instance = key.split(":")[0]; sub = "address " + key.split(":")[1] + " (offline)"; }
+      rows.set(key, { label: "Fuel tank " + instance, sub, placeholder: "e.g. 200" });
+    }
+    if (rows.size === 0) {
+      // Nothing seen and nothing saved: offer a manual instance-0 entry so the
+      // owner can set the tank size before ever connecting to the bus.
+      rows.set("inst:0", { label: "Fuel tank 0", sub: "set now, binds when connected", placeholder: "e.g. 200" });
+    }
+
+    const signature = [...rows.keys()].sort().join(",");
     if (signature === settingRowsKey) return; // never rebuild while the user is typing
     settingRowsKey = signature;
     const holder = document.getElementById("tank-setting-rows");
     holder.textContent = "";
-    if (fuelKeys.length === 0) {
-      holder.textContent = "No fuel tank seen on the bus yet.";
-      return;
-    }
-    for (const key of fuelKeys) {
-      const [instance, address] = key.split(":");
+    for (const [key, meta] of rows) {
       const row = document.createElement("label");
       row.className = "setting-row";
       const text = document.createElement("span");
       text.className = "setting-label";
-      text.append("Fuel tank " + instance + " ");
+      text.append(meta.label + " ");
       const small = document.createElement("small");
-      small.textContent = "(address " + address + ")";
+      small.textContent = "(" + meta.sub + ")";
       text.append(small);
       const input = document.createElement("input");
       input.type = "number"; input.inputMode = "decimal"; input.min = "1"; input.max = "20000"; input.step = "any";
       input.dataset.tank = key;
-      input.value = configuredCapacities[key] !== undefined ? configuredCapacities[key] : "";
-      input.placeholder = tanks[key].capacity_litres ? String(tanks[key].capacity_litres) : "e.g. 200";
+      if (meta.source) input.dataset.source = meta.source;
+      const shown = meta.source && configuredCapacities[meta.source] !== undefined ? configuredCapacities[meta.source] : configuredCapacities[key];
+      input.value = shown !== undefined ? shown : "";
+      input.placeholder = meta.placeholder;
       const unit = document.createElement("span");
       unit.className = "setting-unit"; unit.textContent = "litres";
       row.append(text, input, unit);
@@ -1208,7 +1316,9 @@
       if (!response.ok) return;
       configuredCapacities = (await response.json()).tank_capacity_litres || {};
       settingRowsKey = null; // rebuild rows with the saved values
-      if (latestLivePayload) renderTankSettings(latestLivePayload.tanks);
+      // Render even with no live payload yet, so the owner can set tank sizes
+      // before ever connecting to the bus.
+      renderTankSettings(latestLivePayload ? latestLivePayload.tanks : {});
     } catch (e) { /* settings just stay empty until the next load */ }
   }
 
@@ -1217,6 +1327,8 @@
     const status = document.getElementById("settings-status");
     const capacities = { ...configuredCapacities }; // keep saved sizes for tanks not shown right now
     for (const input of document.querySelectorAll("#tank-setting-rows input[data-tank]")) {
+      const stale = input.dataset.source; // the older key this tank's size was stored under, if any
+      if (stale && stale !== input.dataset.tank) delete capacities[stale];
       if (input.value.trim() === "") delete capacities[input.dataset.tank];
       else capacities[input.dataset.tank] = Number(input.value);
     }
@@ -1233,6 +1345,7 @@
         return;
       }
       configuredCapacities = body.tank_capacity_litres;
+      settingRowsKey = null; // the next live update redraws the rows with the collapsed keys
       status.textContent = "Saved";
     } catch (e) {
       status.className = "error"; status.textContent = "Could not reach the board.";
@@ -1374,11 +1487,12 @@
     const box = document.getElementById("bus-status");
     const headline = document.getElementById("bus-headline");
     const detail = document.getElementById("bus-detail");
-    if (!status || status.available === false) { box.hidden = true; return; }
+    if (!status || status.available === false) { box.hidden = true; markSetupAlert(false); return; }
     const fmt = (n) => Number(n).toLocaleString();
     const age = (v) => (v === null || v === undefined ? "n/a" : v + " s");
     box.hidden = false;
     box.className = status.state;
+    markSetupAlert(status.state !== "receiving");
     if (status.state === "receiving") {
       headline.textContent = "Receiving from the bus: " + status.frames_per_s + " frames/s";
     } else if (status.state === "silent") {
@@ -1410,7 +1524,7 @@
       if (response.ok) renderBusStatus(await response.json());
     } catch (e) {
       const box = document.getElementById("bus-status");
-      box.hidden = false; box.className = "unreachable";
+      box.hidden = false; box.className = "unreachable"; markSetupAlert(true);
       document.getElementById("bus-headline").textContent = "Cannot reach the board";
       document.getElementById("bus-detail").textContent = "";
     }

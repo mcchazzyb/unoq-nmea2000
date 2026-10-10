@@ -171,3 +171,153 @@ def test_api_rejects_bad_capacity_naming_the_parameter(tmp_path):
     assert response.status_code == 400
     assert response.json()["detail"]["parameter"] == "capacities"
     assert client.get("/api/v1/settings").json() == {"tank_capacity_litres": {}}
+
+
+# --- tank size follows the sender's stable NMEA NAME, not its source address --
+#
+# Regression (surgical multi-boat fix, 2026-10-10): a tank size must stay
+# applied when the sender's source address changes (Address Claim), and a new
+# save must persist against the stable NAME so it is portable. Fails before the
+# NAME-resolution change, passes after.
+from service.discovery import DiscoveryMode as _DiscoveryMode  # noqa: E402
+from protocol.decoders.identity import decode_iso_address_claim  # noqa: E402
+from protocol.receiver import CanFrame  # noqa: E402
+from protocol.registry import DecodeResult as _DR  # noqa: E402
+from web.fuel import name_tank_key, to_stable_keys  # noqa: E402
+
+
+def _claim_name(discovery, source_address, nmea_name):
+    """Feed one ISO Address Claim so discovery learns source_address -> NAME."""
+    data = nmea_name.to_bytes(8, "little")
+    frame = CanFrame(
+        can_id=0, priority=6, pgn=60928, source_address=source_address,
+        dest_address=None, dlc=8, payload=data, capture_time=1.0,
+    )
+    decoded = decode_iso_address_claim(source_address=source_address, data=data)
+    discovery.observe(frame, _DR(pgn=60928, source_address=source_address, entity=decoded.entity), now=1.0)
+
+
+def test_name_keyed_size_applies_regardless_of_source_address():
+    name = 0xC0FFEE1234567890
+    tanks = {"0:7": _tank(level=50.0, capacity=None)}  # sender now at SA 7
+    caps = {name_tank_key(name, 0): 200.0}             # size saved against the NAME
+    apply_configured_capacity(tanks, caps, sa_to_name={7: name})
+    assert tanks["0:7"]["capacity_litres"] == 200.0
+    assert tanks["0:7"]["quantity_remaining_litres"] == pytest.approx(100.0)
+
+
+def test_save_rewrites_sa_key_to_stable_name_key():
+    name = 0xC0FFEE1234567890
+    rewritten = to_stable_keys({"0:4": 90.0}, sa_to_name={4: name})
+    assert rewritten == {name_tank_key(name, 0): 90.0}
+    # an SA with no known NAME passes through unchanged (nothing to key against yet)
+    assert to_stable_keys({"0:9": 90.0}, sa_to_name={4: name}) == {"0:9": 90.0}
+
+
+def test_instance_only_size_set_offline_binds_when_tank_appears():
+    """A size entered with NO bus connected (key 'inst:0') must apply to the
+    fuel tank once a sender presents instance 0, whatever its address."""
+    tanks = {"0:4": _tank(level=50.0, capacity=None)}
+    apply_configured_capacity(tanks, {"inst:0": 150.0}, sa_to_name=None)
+    assert tanks["0:4"]["capacity_litres"] == 150.0
+    assert tanks["0:4"]["quantity_remaining_litres"] == pytest.approx(75.0)
+
+
+def test_more_specific_key_wins_over_instance_only():
+    """If both an instance-only and an SA/NAME key exist, the specific one wins."""
+    tanks = {"0:4": _tank(level=50.0, capacity=None)}
+    apply_configured_capacity(tanks, {"inst:0": 100.0, "0:4": 200.0}, sa_to_name=None)
+    assert tanks["0:4"]["capacity_litres"] == 200.0
+
+
+def test_instance_only_key_accepted_and_persists_offline(tmp_path):
+    """Owner sets a tank size with NO bus connected: the API accepts an
+    'inst:<N>' key, saves it, and it survives a restart (offline-first)."""
+    client, cache, capture_dir = _client(tmp_path)
+    assert client.get("/api/v1/live").json()["tanks"] == {}  # nothing on the bus
+    r = client.put("/api/v1/settings/tanks", json={"capacities": {"inst:0": 90.0}})
+    assert r.status_code == 200
+    assert client.get("/api/v1/settings").json()["tank_capacity_litres"] == {"inst:0": 90.0}
+    client2 = TestClient(create_app(LiveStateCache(), DiscoveryMode(), capture_dir))
+    assert client2.get("/api/v1/settings").json()["tank_capacity_litres"] == {"inst:0": 90.0}
+
+
+def test_api_tank_size_survives_source_address_change(tmp_path):
+    """End to end: set a size while the tank is at SA 4, then the SAME sender
+    reappears at SA 11 (Address Claim). The size must still apply."""
+    name = 0xA1B2C3D4E5F60718
+    cache = LiveStateCache()
+    discovery = _DiscoveryMode()
+    capture_dir = tmp_path / "captures"
+    capture_dir.mkdir()
+    client = TestClient(create_app(cache, discovery, capture_dir))
+
+    # Sender known at SA 4; a fuel tank (instance 0) decoded there.
+    _claim_name(discovery, 4, name)
+    cache.update(DecodeResult(pgn=0, source_address=4,
+                              entity=TankState(tank_instance=0, fluid_type=0, level_percent=50.0,
+                                               source_address=4, updated_at=1.0)))
+    assert client.put("/api/v1/settings/tanks", json={"capacities": {"0:4": 90.0}}).status_code == 200
+    # Saved against the stable NAME, not the SA.
+    saved = client.get("/api/v1/settings").json()["tank_capacity_litres"]
+    assert saved == {name_tank_key(name, 0): 90.0}
+
+    # Same sender now claims SA 11; the tank entity moves with it.
+    _claim_name(discovery, 11, name)
+    cache.update(DecodeResult(pgn=0, source_address=11,
+                              entity=TankState(tank_instance=0, fluid_type=0, level_percent=50.0,
+                                               source_address=11, updated_at=2.0)))
+    live = client.get("/api/v1/live").json()
+    assert live["tanks"]["0:11"]["capacity_litres"] == 90.0
+    assert live["tanks"]["0:11"]["quantity_remaining_litres"] == pytest.approx(45.0)
+
+
+# --- review findings (cross-model review gate, 2026-10-10) --------------------
+#
+# Each fails before the fix: an instance-only size must never be handed to
+# several tanks (that overstates fuel), and the Setup form must show one row
+# per tank and collapse old keys when saved.
+
+
+def test_instance_only_size_not_applied_when_two_fuel_tanks_share_an_instance():
+    tanks = {"0:4": _tank(level=50.0, capacity=None), "0:5": _tank(level=50.0, capacity=None)}
+    apply_configured_capacity(tanks, {"inst:0": 100.0}, sa_to_name=None)
+    assert tanks["0:4"]["capacity_litres"] is None and tanks["0:5"]["capacity_litres"] is None
+    s = fuel_summary(tanks, {"0:23": _engine(10.0)}, None)
+    assert s["remaining_litres"] is None and s["needs_capacity"] == ["0:4", "0:5"]  # asks, never guesses
+
+
+def test_instance_only_size_applies_to_fuel_not_water_tank_of_same_instance():
+    tanks = {"0:4": _tank(level=50.0, capacity=None, fluid_type=0),
+             "0:6": _tank(level=50.0, capacity=None, fluid_type=1)}
+    apply_configured_capacity(tanks, {"inst:0": 90.0}, sa_to_name=None)
+    assert tanks["0:4"]["capacity_litres"] == 90.0
+    assert tanks["0:6"]["capacity_litres"] is None
+
+
+def test_each_tank_reports_the_key_to_save_under_and_where_its_size_came_from():
+    name = 0xC0FFEE1234567890
+    tanks = {"0:4": _tank(level=50.0, capacity=None)}
+    apply_configured_capacity(tanks, {"inst:0": 90.0}, sa_to_name={4: name})
+    assert tanks["0:4"]["setting_key"] == name_tank_key(name, 0)  # stable key for the next save
+    assert tanks["0:4"]["setting_source_key"] == "inst:0"         # the old key the form must collapse
+    unsized = {"0:9": _tank(level=50.0, capacity=None)}
+    apply_configured_capacity(unsized, {}, sa_to_name=None)
+    assert unsized["0:9"]["setting_key"] == "0:9" and "setting_source_key" not in unsized["0:9"]
+
+
+def test_setup_form_uses_server_keys_and_collapses_stale_aliases():
+    html = open("web/static/index.html", encoding="utf-8").read()
+    assert "tank.setting_key" in html and "tank.setting_source_key" in html
+    assert "delete capacities[stale]" in html          # saving drops the old alias
+    assert "consumed.has(key)" in html                 # a folded-in key is not shown as a second row
+
+
+def test_offline_legacy_key_is_not_rebound_to_a_new_sender_on_save():
+    """Review finding: a size saved for a tank that is offline ('0:4') must not be
+    rewritten onto whichever different sender now holds address 4."""
+    other = 0x1122334455667788
+    caps = {"0:4": 90.0, "1:7": 50.0}
+    out = to_stable_keys(caps, sa_to_name={4: other, 7: other}, live_keys={"1:7"})
+    assert out["0:4"] == 90.0                      # offline: left exactly as saved
+    assert out == {"0:4": 90.0, name_tank_key(other, 1): 50.0}  # live tank 1:7 is rewritten

@@ -120,7 +120,7 @@ def test_engine_dynamic_full_frame_decodes_all_mapped_fields():
     struct.pack_into("<H", data, 5, 28315)  # coolant 283.15K -> 10.0C
     struct.pack_into("<h", data, 7, 1234)  # alternator 12.34V
     struct.pack_into("<h", data, 9, -50)  # fuel rate -5.0 L/h
-    struct.pack_into("<I", data, 11, 3600)  # engine hours
+    struct.pack_into("<I", data, 11, 3600)  # engine hours: 3600 s -> 1.0 h
     struct.pack_into("<H", data, 15, 0xFFFF)  # coolant pressure N/A
     struct.pack_into("<H", data, 17, 0xFFFF)  # fuel pressure N/A
     data[19] = 0  # reserved
@@ -134,9 +134,34 @@ def test_engine_dynamic_full_frame_decodes_all_mapped_fields():
     assert round(state.coolant_temp, 2) == 10.0
     assert round(state.alternator_voltage, 2) == 12.34
     assert round(state.fuel_rate, 1) == -5.0
-    assert state.engine_hours == 3600
+    assert state.engine_hours == 1.0  # 3600 s / 3600 = 1.0 h
     assert state.oil_pressure is UNSET
     assert state.status == 99
+
+
+def test_engine_hours_is_reported_in_hours_not_raw_seconds():
+    """Regression (2026-10-10 boat trip): PGN 127489 total-hours field is 1 s
+    resolution on the wire; EngineState.engine_hours must be HOURS, not raw
+    seconds. The boat sender reported raw 661920 s; the dashboard showed
+    "661920 s" instead of ~183.87 h. Fails before the /3600 fix, passes after."""
+    data = bytearray(26)
+    data[0] = 0  # instance
+    struct.pack_into("<H", data, 1, 0xFFFF)  # oil pressure N/A
+    struct.pack_into("<H", data, 3, 0xFFFF)  # oil temp N/A
+    struct.pack_into("<H", data, 5, 0xFFFF)  # coolant N/A
+    struct.pack_into("<h", data, 7, 0x7FFF)  # alternator N/A
+    struct.pack_into("<h", data, 9, 0x7FFF)  # fuel rate N/A
+    struct.pack_into("<I", data, 11, 661_920)  # real boat value, raw seconds
+    struct.pack_into("<H", data, 15, 0xFFFF)
+    struct.pack_into("<H", data, 17, 0xFFFF)
+    struct.pack_into("<H", data, 20, 0)
+    struct.pack_into("<H", data, 22, 0)
+    data[24] = 0x7F
+    data[25] = 0x7F
+    state: EngineState = decode_engine_dynamic(source_address=1, data=bytes(data)).entity
+    assert round(state.engine_hours, 2) == 183.87
+    # must NOT still be the raw seconds count
+    assert state.engine_hours != 661_920
 
 
 # --- Requirement 8 / Property 14, 15, 33: tank decoder ----------------------

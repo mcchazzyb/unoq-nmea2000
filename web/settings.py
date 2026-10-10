@@ -19,7 +19,22 @@ import threading
 from pathlib import Path
 
 _TANK_KEY = re.compile(r"^\d{1,3}:\d{1,3}$")
+#: Instance-only key: a tank size entered BEFORE any bus connection, when the
+#: sender's source address and NAME are not yet known. Binds to whichever
+#: sender later presents that tank instance (web.fuel resolver fallback).
+_INSTANCE_TANK_KEY = re.compile(r"^inst:\d{1,3}$")
+#: Stable, source-address-independent tank key: the sender's 64-bit NMEA NAME
+#: (16 lowercase hex) plus the tank instance. Preferred when the NAME is known
+#: so a saved size survives Address Claim / source-address reassignment and
+#: moving the unit to another boat (steering 08: identity is the NAME, not SA).
+_NAME_TANK_KEY = re.compile(r"^name:[0-9a-f]{16}:\d{1,3}$")
 MAX_TANK_LITRES = 20000.0  # sanity bound at the trust boundary, not a tank spec
+
+
+def _valid_tank_key(key: object) -> bool:
+    return isinstance(key, str) and bool(
+        _TANK_KEY.match(key) or _NAME_TANK_KEY.match(key) or _INSTANCE_TANK_KEY.match(key)
+    )
 
 
 def validate_tank_capacities(raw: object) -> dict[str, float]:
@@ -28,8 +43,11 @@ def validate_tank_capacities(raw: object) -> dict[str, float]:
         raise ValueError("capacities must be an object of tank key to litres")
     out: dict[str, float] = {}
     for key, value in raw.items():
-        if not isinstance(key, str) or not _TANK_KEY.match(key):
-            raise ValueError(f"tank key {key!r} must look like '<instance>:<source_address>'")
+        if not _valid_tank_key(key):
+            raise ValueError(
+                f"tank key {key!r} must look like '<instance>:<source_address>', "
+                f"'name:<16-hex-nmea-name>:<instance>', or 'inst:<instance>'"
+            )
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"capacity for {key} must be a number of litres")
         if not math.isfinite(value) or not 0 < value <= MAX_TANK_LITRES:

@@ -24,7 +24,7 @@ from service.bus_stats import BusStats
 from service.cache import LiveStateCache
 from service.discovery import DiscoveryMode
 from service.raw_log import CorruptLine, iter_records
-from web.fuel import apply_configured_capacity, fuel_summary
+from web.fuel import apply_configured_capacity, fuel_summary, to_stable_keys as _to_stable_keys
 from web.settings import SettingsStore
 
 #: Requirement 14.6: reject beyond this many concurrent replay/log operations.
@@ -164,12 +164,22 @@ def create_app(
         snap["receiver_ok_age_s"] = cache.receiver_ok_age_s()
         return snap
 
+    def _sa_to_name() -> dict[int, int]:
+        """Current source address -> 64-bit NMEA NAME, for every node whose
+        NAME is known. Lets a tank size saved against the stable NAME follow
+        the sender across source-address changes (steering 08)."""
+        return {
+            n.current_source_address: n.nmea_name
+            for n in discovery.known_nodes()
+            if n.current_source_address is not None and n.nmea_name is not None
+        }
+
     def _live_payload() -> dict:
         """One builder for REST and WebSocket so they can never disagree."""
         vessel = cache.snapshot()
         engines = {f"{k[0]}:{k[1]}": _entity_to_response_dict(v) for k, v in vessel.engines.items()}
         tanks = {f"{k[0]}:{k[1]}": _entity_to_response_dict(v) for k, v in vessel.tanks.items()}
-        apply_configured_capacity(tanks, settings.tank_capacities())
+        apply_configured_capacity(tanks, settings.tank_capacities(), _sa_to_name())
         electrical = _entity_to_response_dict(vessel.electrical) if vessel.electrical else None
         navigation = _entity_to_response_dict(vessel.navigation) if vessel.navigation else None
         return {
@@ -191,9 +201,16 @@ def create_app(
 
     @app.put("/api/v1/settings/tanks")
     def put_tank_settings(request: TankSettingsRequest):
-        """Replace all owner-set tank sizes (litres), keyed '<instance>:<source_address>'."""
+        """Replace all owner-set tank sizes (litres). Keys may be the legacy
+        '<instance>:<source_address>' form or the stable
+        'name:<nmea-name-hex>:<instance>' form. A legacy SA key is rewritten to
+        the stable NAME key when that sender's NAME is currently known, so the
+        size survives source-address changes without the owner re-entering it."""
         try:
-            saved = settings.set_tank_capacities(request.capacities)
+            live_keys = {f"{k[0]}:{k[1]}" for k in cache.snapshot().tanks}
+            saved = settings.set_tank_capacities(
+                _to_stable_keys(request.capacities, _sa_to_name(), live_keys)
+            )
         except ValueError as exc:
             raise ValidationError("capacities", str(exc))
         except OSError:

@@ -91,6 +91,7 @@ def decode_engine_dynamic(source_address: int, data: bytes) -> DecodeResult:
       7-8:   Alternator potential, signed, resolution 0.01 V, 0x7FFF = N/A
       9-10:  Fuel rate, signed, resolution 0.1 L/h, 0x7FFF = N/A
       11-14: Total engine hours, resolution 1 s, 0xFFFFFFFF = N/A
+             (converted to hours in EngineState.engine_hours)
       15-18: Coolant/fuel pressure (unused by EngineState)
       19:    Reserved
       20-21: Discrete Status 1 (bitfield) -> EngineState.status
@@ -120,7 +121,9 @@ def decode_engine_dynamic(source_address: int, data: bytes) -> DecodeResult:
 
     if len(data) >= 15:
         raw = struct.unpack_from("<I", data, 11)[0]
-        state.engine_hours = UNSET if raw == _U32_NA else raw
+        # Wire resolution is 1 second (canboat PGN 127489 "Engine Total Hours of
+        # Operation"). engine_hours is reported in HOURS, so divide by 3600.
+        state.engine_hours = UNSET if raw == _U32_NA else raw / 3600.0
 
     if len(data) >= 11:
         raw = struct.unpack_from("<h", data, 9)[0]

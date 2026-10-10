@@ -79,7 +79,7 @@ def test_engine_rapid_update_and_dynamic_merge_not_replace():
     assert engine.oil_pressure == 3100000
     assert engine.alternator_voltage == 13.8
     assert engine.fuel_rate == 18.5
-    assert engine.engine_hours == 452_000
+    assert round(engine.engine_hours, 4) == round(452_000 / 3600, 4)  # raw seconds -> hours
     # ...AND the PGN 127488 fields from the FIRST update are still present --
     # this is the actual regression check: before the fix, this update
     # would have wiped rpm/trim back to UNSET.
