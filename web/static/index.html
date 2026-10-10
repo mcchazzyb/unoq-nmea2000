@@ -538,6 +538,15 @@
   #setup-alert { color: var(--stale); font-weight: 600; }
   #setup-alert[hidden] { display: none; }
   #bus-status { border-bottom: 0; padding: 0.7rem 0.9rem; }
+  #shutdown-help { margin: 0 0 0.8rem; font-size: 0.86rem; color: var(--text-mid); }
+  #shutdown-button {
+    min-height: 44px; padding: 0 1.1rem; font-weight: 600; font-size: 0.86rem; cursor: pointer;
+    background: transparent; color: var(--offline); border: 1px solid var(--offline); border-radius: 7px;
+  }
+  #shutdown-button.armed { background: var(--offline); color: #1a0505; }
+  #shutdown-button:disabled { opacity: 0.5; cursor: default; }
+  #shutdown-status { margin-left: 0.8rem; font-size: 0.86rem; color: var(--text-mid); }
+  #shutdown-status.error { color: var(--offline); }
 
   /* Phone-portrait base already applies (Requirement 30.1); this rule only
      tightens padding further at the narrowest end of the range. */
@@ -635,6 +644,13 @@
     </table>
     <div id="discovery-empty" style="display:none;">No nodes discovered yet.</div>
     <div id="node-detail"></div>
+  </section>
+
+  <section class="panel panel-wide" id="power-section">
+    <h2>Board power</h2>
+    <p id="shutdown-help">Shut the board down cleanly before you switch the boat power off, so nothing is being written when the power goes. To start it again, switch the power off and on.</p>
+    <button id="shutdown-button" type="button">Shut down the board</button>
+    <span id="shutdown-status" role="status" aria-live="polite"></span>
   </section>
 </main>
 
@@ -1351,6 +1367,77 @@
       status.className = "error"; status.textContent = "Could not reach the board.";
     }
   });
+  // --- Board power: two taps to shut down. The first arms the button, the second sends the request. ---
+  (function () {
+    const button = document.getElementById("shutdown-button");
+    const status = document.getElementById("shutdown-status");
+    const LABEL = "Shut down the board";
+    let armTimer = null;
+    function disarm() {
+      clearTimeout(armTimer); armTimer = null;
+      button.classList.remove("armed"); button.textContent = LABEL;
+    }
+    function show(text, isError) { status.className = isError ? "error" : ""; status.textContent = text; }
+    // Only the host's explicit word counts: "queued" is written after systemctl accepted the power-off. The
+    // request merely disappearing proves nothing (systemctl may be about to fail), and neither does a dropped
+    // connection (it could be the phone's wifi), so only "queued" ever says it started.
+    async function confirmHostTookIt() {
+      for (let i = 0; i < 15; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        try {
+          const response = await fetch("/api/v1/system/shutdown");
+          if (response.ok) {
+            const state = await response.json();
+            if (state.failed) {
+              show("The board took the request but could not start the shutdown. It is NOT shutting down.", true);
+              button.disabled = false;
+              return;
+            }
+            if (state.queued) {
+              show("Shutdown started. The dashboard goes offline in a few seconds; wait about 30 seconds after that before you switch the power off.");
+              return;
+            }
+          }
+        } catch (e) {
+          show("Lost contact with the board. If this is the shutdown, the dashboard stays offline: wait about 30 seconds, then switch off. If you can reach the dashboard again, it did NOT shut down.", true);
+          button.disabled = false;
+          return;
+        }
+      }
+      const taken = !(await fetch("/api/v1/system/shutdown").then((r) => r.json()).catch(() => ({ pending: true }))).pending;
+      show(taken
+        ? "The board took the request but did not confirm the shutdown started. Do not cut the power until the dashboard goes offline."
+        : "The board did not accept the request, so it is NOT shutting down. Do not rely on this button.", true);
+      button.disabled = false;
+    }
+    button.addEventListener("click", async () => {
+      if (armTimer === null) {
+        button.classList.add("armed"); button.textContent = "Tap again to shut down";
+        show("Tap again within 5 seconds to confirm.");
+        armTimer = setTimeout(() => { disarm(); show(""); }, 5000);
+        return;
+      }
+      disarm(); button.disabled = true; show("Sending...");
+      try {
+        const response = await fetch("/api/v1/system/shutdown", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: "shutdown" }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          show((body.detail && body.detail.error) || "The board refused the request.", true);
+          button.disabled = false;
+          return;
+        }
+        show("Request sent. Waiting for the board...");
+        await confirmHostTookIt();
+      } catch (e) {
+        show("Could not reach the board.", true);
+        button.disabled = false;
+      }
+    });
+  })();
+
   loadSettings();
 
   function renderLive(data) {

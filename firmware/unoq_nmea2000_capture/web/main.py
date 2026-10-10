@@ -81,12 +81,11 @@ def main() -> int:
     cache = LiveStateCache()
     discovery = DiscoveryMode()
     bus_stats = BusStats()
-    app = create_app(cache, discovery, capture_dir, bus_stats=bus_stats)
-
     # Flight recorder: fsynced diagnostics that survive a dirty power-off (service/flight_recorder.py).
     # Lives beside the capture directory, not inside it, so clearing captures never clears the evidence.
     recorder = FlightRecorder(Path(os.environ.get("UNOQ_BLACKBOX_DIR", str(capture_dir.parent / "blackbox"))))
     logging.getLogger().addHandler(RecorderLogHandler(recorder))
+    app = create_app(cache, discovery, capture_dir, bus_stats=bus_stats, recorder=recorder)
 
     # Requirement 14.10, 14.11: a continuous receiver loop feeds the SAME
     # cache/discovery the Web_API reads, selected by configuration only

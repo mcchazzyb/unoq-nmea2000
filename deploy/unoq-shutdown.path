@@ -1,0 +1,21 @@
+# Watches for the dashboard's shutdown request file and starts unoq-shutdown.service.
+# Install on the board with scripts/install_shutdown.sh, or by hand:
+#   sudo cp /home/arduino/unoq-nmea2000/deploy/unoq-shutdown.path    /etc/systemd/system/
+#   sudo cp /home/arduino/unoq-nmea2000/deploy/unoq-shutdown.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now unoq-shutdown.path
+#
+# COPY the files; do NOT `systemctl enable /home/...`. A symlink into /home dangles at boot because /home is
+# a separate partition mounted after systemd reads /etc/systemd/system (the boat, 2026-10-09).
+#
+# The path is the app's bind-mounted .cache directory: /app/.cache in the container is
+# /home/arduino/ArduinoApps/unoq_nmea2000_capture/.cache on the host.
+[Unit]
+Description=unoq-nmea2000 watch for a shutdown request from the dashboard
+RequiresMountsFor=/home/arduino
+
+[Path]
+PathExists=/home/arduino/ArduinoApps/unoq_nmea2000_capture/.cache/shutdown-request
+Unit=unoq-shutdown.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+# Cleanly powers the board off when the dashboard asks (see deploy/unoq-shutdown.path and
+# deploy/unoq_shutdown.sh). Started by the path unit, never enabled on its own. Runs as root.
+# It only acts when the request carries THIS boot's id, so a stale request cannot cause a boot loop.
+[Unit]
+Description=unoq-nmea2000 clean power-off requested from the dashboard
+RequiresMountsFor=/home/arduino
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /home/arduino/unoq-nmea2000/deploy/unoq_shutdown.sh /home/arduino/ArduinoApps/unoq_nmea2000_capture/.cache/shutdown-request

@@ -59,6 +59,20 @@ whole map: `{"capacities": {"0:42": 200}}`. A size must be above 0 and at most
 sender's own capacity and the tank's litres remaining is marked `derived`
 (`... * configured_capacity_litres (owner setting)`).
 
+### `POST /api/v1/system/shutdown` and `GET /api/v1/system/shutdown`
+
+The Setup tab's **Shut down the board** button. `POST` with the JSON body
+`{"confirm": "shutdown"}` (anything else is rejected with 422) writes a request file
+(`shutdown-request`, beside the capture directory) holding the kernel boot id and
+returns 202. A host systemd unit (`deploy/unoq-shutdown.path`) then runs
+`systemctl poweroff`, but only if the boot id matches the current boot, so a request left
+by a power cut cannot power the board off again at the next boot. `GET` returns
+`{"pending": ..., "queued": ..., "failed": ...}`. `queued: true` is the only proof the
+power-off was accepted (the host writes it after `systemctl poweroff` succeeds). `pending`
+that stays true means the host unit is not installed; `failed: true` means `systemctl` could
+not queue it. Anything other than `queued` means the board is NOT shutting down. Like the rest of this API there is no authentication (steering 15):
+anyone on the boat network can press it. The black box records `shutdown_requested`.
+
 ### `GET /api/v1/nodes`
 
 Discovered node inventory from `DiscoveryMode`, split into `known` (NAME

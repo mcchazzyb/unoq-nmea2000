@@ -64,6 +64,8 @@ def _describe(r: dict) -> str | None:
         if "services" in changed:
             bits.append(f"services={r.get('services')}")
         return "HOST " + "; ".join(bits)
+    if kind == "shutdown_requested":
+        return "SHUTDOWN requested from the dashboard (a clean power-off, not a power cut)"
     if kind == "log":
         return f"LOG {r.get('level')} {r.get('text')}"
     return None

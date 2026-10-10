@@ -27,6 +27,7 @@ check "journald keeps its log on disk and syncs often (survives a dirty power-of
 check "app flight recorder is writing (blackbox.jsonl updated in the last 60 s)" "ssh -o BatchMode=yes $HOST 'test -n \"\$(find $APP/.cache/blackbox -name blackbox.jsonl -mmin -1 2>/dev/null)\"'"
 check "dashboard serves /api/v1/bus-status" "ssh -o BatchMode=yes $HOST 'curl -sf -m5 http://127.0.0.1:8000/api/v1/bus-status | grep -q available.:true'"
 check "Docker app network is outside 172.16.0.0/12 (the iPhone hotspot is always 172.20.10.0/28)" "ssh -o BatchMode=yes $HOST 'docker network inspect unoq_nmea2000_capture_default --format \"{{range .IPAM.Config}}{{.Subnet}}{{end}}\" | grep -qv \"^172\\.\(1[6-9]\|2[0-9]\|3[01]\)\\.\"'"
+check "dashboard Shut down button has its host unit (watching for the request; real files, not symlinks into /home)" "ssh -o BatchMode=yes $HOST 'systemctl is-active --quiet unoq-shutdown.path && test -f /etc/systemd/system/unoq-shutdown.path && ! test -L /etc/systemd/system/unoq-shutdown.path && test -f /etc/systemd/system/unoq-shutdown.service && ! test -L /etc/systemd/system/unoq-shutdown.service'"
 check "no bench soak script left running" "! ssh -o BatchMode=yes $HOST 'ps -eo cmd | grep -Eq \"[s]oak_(watch|obs)\"'"
 echo "MANUAL: D6 jumper removed? CAN wiring/terminators checked? Power via a fused, surge-protected feed?"
 exit $fail

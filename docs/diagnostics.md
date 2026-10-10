@@ -52,6 +52,14 @@ scripts/boat_preflight.sh arduino@<board>               # checks all of the abov
 Units are copied into `/etc/systemd/system`, never linked from `/home` (a symlink into the separate `/home`
 partition fails to load at boot).
 
+## Shutting down on purpose
+
+Press **Shut down the board** in the Setup tab (two taps) before you switch the boat power off, then
+wait about 30 seconds. It powers the board off cleanly, so nothing is mid-write when the power goes. The
+black box records `shutdown_requested`, so the report tells a clean power-off from a power cut. Install
+the host side once with `scripts/install_shutdown.sh arduino@<board>`; `scripts/boat_preflight.sh` checks
+it. The board stays off until its power is switched off and on again.
+
 ## Verified
 
 2026-10-09 on the board: a hard reboot with no sync (`echo b > /proc/sysrq-trigger`) about 4 s after the

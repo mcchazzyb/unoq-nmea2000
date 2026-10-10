@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -23,7 +23,11 @@ from protocol.domain import UNSET
 from service.bus_stats import BusStats
 from service.cache import LiveStateCache
 from service.discovery import DiscoveryMode
+from service.flight_recorder import FlightRecorder
 from service.raw_log import CorruptLine, iter_records
+from service.shutdown_request import (
+    ShutdownUnavailable, clear_markers, has_failed, has_queued, is_pending, request_file, request_shutdown,
+)
 from web.fuel import apply_configured_capacity, fuel_summary, to_stable_keys as _to_stable_keys
 from web.settings import SettingsStore
 
@@ -96,6 +100,11 @@ class ReplayRequest(BaseModel):
     log_id: str = Field(..., min_length=1, max_length=255)
 
 
+class ShutdownRequest(BaseModel):
+    # The literal is a deliberate guard: only an explicit, well-formed JSON body powers the board off.
+    confirm: Literal["shutdown"]
+
+
 class TankSettingsRequest(BaseModel):
     # Validated by web.settings so the error can name the exact bad tank.
     capacities: dict[str, object]
@@ -108,6 +117,8 @@ def create_app(
     device_info: Optional[dict] = None,
     settings: Optional[SettingsStore] = None,
     bus_stats: Optional[BusStats] = None,
+    recorder: Optional[FlightRecorder] = None,
+    shutdown_file: Optional[Path] = None,
 ) -> FastAPI:
     """Build the FastAPI app wired to a specific cache/discovery/capture_dir.
 
@@ -119,6 +130,9 @@ def create_app(
     capture_dir = capture_dir.resolve()
     device_info = device_info or {}
     settings = settings or SettingsStore(capture_dir / "settings.json")
+    # Beside the capture directory (the bind-mounted .cache on the board), where the host path unit watches.
+    shutdown_file = Path(shutdown_file) if shutdown_file else request_file(capture_dir.parent)
+    clear_markers(shutdown_file)  # an outcome left from before a reboot or restart must not be read as current
     _active_operations = {"count": 0}
     _ws_last_push: dict[int, float] = {}
 
@@ -217,6 +231,31 @@ def create_app(
             # Disk full / read-only: report it, keep serving (steering 11).
             raise HTTPException(status_code=507, detail={"error": "could not save settings"})
         return {"tank_capacity_litres": saved}
+
+    @app.post("/api/v1/system/shutdown", status_code=202)
+    def post_shutdown(request: ShutdownRequest):
+        """Ask the host to power the board off cleanly. The host deletes the request file when it
+        takes it (see GET); until then nothing has happened."""
+        try:
+            request_shutdown(shutdown_file)
+        except ShutdownUnavailable as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)})
+        except OSError:
+            raise HTTPException(status_code=500, detail={"error": "could not write the shutdown request"})
+        if recorder is not None:
+            recorder.record("shutdown_requested", note="clean power-off requested from the dashboard")
+        return {"status": "requested"}
+
+    @app.get("/api/v1/system/shutdown")
+    def get_shutdown():
+        """pending=true while the request file still exists (host not yet there; if it stays true the host unit
+        is not installed). queued=true ONLY once systemctl accepted the power-off: the one proof of success.
+        failed=true means the host could not queue it. Anything but queued is NOT a shutdown."""
+        return {
+            "pending": is_pending(shutdown_file),
+            "queued": has_queued(shutdown_file),
+            "failed": has_failed(shutdown_file),
+        }
 
     @app.get("/api/v1/nodes")
     def get_nodes():
